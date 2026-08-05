@@ -210,6 +210,7 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
     ax.set_title(title, color=INK, fontsize=12, loc="left")
     ax.set_ylabel(ylabel)
     tz = all_x[0].tzinfo if all_x else None
+    ax.xaxis.set_major_locator(mdates.MinuteLocator(byminute=[0, 30], tz=tz))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=tz))
     fig.autofmt_xdate()
     handles, labels_ = ax.get_legend_handles_labels()
@@ -463,6 +464,7 @@ def main():
         ax.set_xlim(lo - pad, hi + pad)
         ax.set_title("Queue wait time (eligible pending jobs)", loc="left")
         ax.set_ylabel("hours waited so far")
+        ax.xaxis.set_major_locator(mdates.MinuteLocator(byminute=[0, 30], tz=x4[0].tzinfo))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=x4[0].tzinfo))
         fig.autofmt_xdate()
         ax.legend(frameon=False, fontsize=8)
