@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T14:21:36-07:00
-Samples: 12 queue snapshots, 12 GPU snapshots
+Last updated: 2026-08-05T14:30:17-07:00
+Samples: 13 queue snapshots, 13 GPU snapshots
 
 ## Resources
 
@@ -16,21 +16,21 @@ Samples: 12 queue snapshots, 12 GPU snapshots
 
 ## Headline
 
-- **84.9%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **36.7%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **85.0%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **36.2%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>167.6</td><td align='right'>1340.7</td><td align='right'>7%</td></tr>
-<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>82.4</td><td align='right'>82.4</td><td align='right'>45%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>18.5</td><td align='right'>91.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>11.0</td><td align='right'>55.0</td><td align='right'>72%</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>173.5</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>660.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>81.5</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>12.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>182.6</td><td align='right'>1460.7</td><td align='right'>7%</td></tr>
+<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>91.9</td><td align='right'>91.9</td><td align='right'>44%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>19.0</td><td align='right'>91.5</td><td align='right'>71%</td></tr>
+<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>12.0</td><td align='right'>60.0</td><td align='right'>71%</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>193.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>97.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>14.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>720.0</td><td align='right'>—</td></tr>
 </table>
 
 (Row background is each lab's chart color, lightened, matching the charts above - GitHub strips the inline CSS that carries it (confirmed against the live rendered page), so on github.com this table renders plain; the tint shows in renderers that keep inline styles, e.g. an editor's local Markdown preview.)
@@ -43,7 +43,7 @@ Samples: 12 queue snapshots, 12 GPU snapshots
 
 Both charts share the same layout: solid color is allocation by lab, and the dashed line is total cluster capacity, so any gap above it is unallocated headroom. The GPU chart additionally splits each lab's solid region into *utilized* (solid) vs *allocated but idle* (same color, translucent + hatched) - idle capacity stays attributed to the lab holding it rather than one undifferentiated gray band. Solid gray on top is real `nvidia-smi` utilization that couldn't be traced to a job or lab. The CPU chart has no idle split - this cluster doesn't expose per-job CPU utilization (checked: `sstat` returns no CPU-time data for running jobs here), only what's allocated, so CPU shows allocation only. Say the word if you'd like real CPU-utilization telemetry added - it would need a new sampling step, most likely ssh + `/proc/stat` per node, similar to how GPU utilization is collected today.
 
-Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (misses containerized/namespaced processes - it just can't see those PIDs), backfilled from Slurm's own GPU-to-job binding record (`scontrol show job -dd`, which doesn't depend on process visibility at all - it's the scheduler's own allocation, not an inference from what a node will show over ssh). The scontrol fallback attributed **442** GPU readings this run that the process-listing path missed.
+Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (misses containerized/namespaced processes - it just can't see those PIDs), backfilled from Slurm's own GPU-to-job binding record (`scontrol show job -dd`, which doesn't depend on process visibility at all - it's the scheduler's own allocation, not an inference from what a node will show over ssh). The scontrol fallback attributed **486** GPU readings this run that the process-listing path missed.
 
 ## Queue
 
@@ -55,7 +55,7 @@ Only jobs Slurm is actively scoring for scheduling (has a `sprio` priority) coun
 
 ![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)
 
-Each point is one user at one snapshot (n=91), not averaged over time - the point is to see how a user's position moves, not collapse it to a single number. Both axes are usage decayed with Slurm's own ~7-day fairshare half-life (`PriorityDecayHalfLife` on this cluster), not a lifetime total or a per-day average, so this is close to what Slurm itself is actually tracking at each moment.
+Each point is one user at one snapshot (n=100), not averaged over time - the point is to see how a user's position moves, not collapse it to a single number. Both axes are usage decayed with Slurm's own ~7-day fairshare half-life (`PriorityDecayHalfLife` on this cluster), not a lifetime total or a per-day average, so this is close to what Slurm itself is actually tracking at each moment.
 
 **CPU usage (x-axis) is essentially what earns priority here; GPU usage (y-axis) is what Slurm could weight the same way but doesn't**, confirmed directly from the Slurm config: `PriorityWeightTRES` is unset, and partition `main` has no `TRESBillingWeights` configured, so fairshare usage accounting bills by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. The users worth a second look are in the **upper-left**: low decayed CPU usage (so a high, unpenalized fairshare priority) paired with high decayed GPU usage.
 
