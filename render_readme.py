@@ -517,9 +517,10 @@ def main():
                      f"<td align='right'>{util}</td></tr>")
     lines.append("</table>")
     lines.append("")
-    lines.append("(Row tint is each lab's chart color, lightened - GitHub strips inline CSS "
-                 "from some contexts, so the colored square is the reliable cue if the tint "
-                 "doesn't render for you.)")
+    lines.append("(Row background is each lab's chart color, lightened - GitHub strips the "
+                 "inline CSS that carries it, confirmed against the live rendered page, so "
+                 "on github.com the colored square is what you'll actually see; the tint is "
+                 "there for other renderers, e.g. an editor's local Markdown preview.)")
     lines.append("")
     lines.append("## Usage over time")
     lines.append("")
