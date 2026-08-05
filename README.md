@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T12:00:16-07:00
-Samples: 11 queue snapshots, 11 GPU snapshots
+Last updated: 2026-08-05T12:30:17-07:00
+Samples: 12 queue snapshots, 12 GPU snapshots
 
 ## Resources
 
@@ -16,20 +16,20 @@ Samples: 11 queue snapshots, 11 GPU snapshots
 
 ## Headline
 
-- **84.7%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **38.6%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **84.9%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **38.8%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
 | Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |
 |---|---|---:|---:|---:|
-| witter-lab | user-d58f5a15 | 153.6 | 1228.7 | 7% |
-| zhuang-lab | user-0db9ced0 | 71.4 | 71.4 | 50% |
-| witter-lab | user-554c620c | 18.5 | 107.0 | 71% |
-| nerenberg-lab | user-6bb5f332 | 10.0 | 50.0 | 74% |
-| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 109.0 | — |
-| enkavi-lab | user-c21bdaa4 | 0.0 | 4.0 | — |
-| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 600.0 | — |
+| witter-lab | user-d58f5a15 | 169.6 | 1356.7 | 8% |
+| zhuang-lab | user-0db9ced0 | 78.9 | 78.9 | 50% |
+| witter-lab | user-554c620c | 20.0 | 113.5 | 73% |
+| nerenberg-lab | user-6bb5f332 | 11.0 | 55.0 | 74% |
+| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 660.0 | — |
+| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 131.5 | — |
+| enkavi-lab | user-c21bdaa4 | 0.0 | 6.0 | — |
 
 ## Usage over time
 
@@ -39,7 +39,7 @@ Samples: 11 queue snapshots, 11 GPU snapshots
 
 The GPU chart layers four things: solid color is GPU-hardware utilization by lab (Σ util% across that lab's allocated GPUs); solid gray is real utilization `nvidia-smi` reports that couldn't be traced to a job or lab; the hatched gray band on top of that is *actually* idle - allocated but not computing at all; and the dashed line is total cluster GPU capacity, so any gap above it is unallocated headroom.
 
-Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (misses containerized/namespaced processes - it just can't see those PIDs), backfilled from Slurm's own GPU-to-job binding record (`scontrol show job -dd`, which doesn't depend on process visibility at all - it's the scheduler's own allocation, not an inference from what a node will show over ssh). The scontrol fallback attributed **270** GPU readings this run that the process-listing path missed.
+Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (misses containerized/namespaced processes - it just can't see those PIDs), backfilled from Slurm's own GPU-to-job binding record (`scontrol show job -dd`, which doesn't depend on process visibility at all - it's the scheduler's own allocation, not an inference from what a node will show over ssh). The scontrol fallback attributed **313** GPU readings this run that the process-listing path missed.
 
 ## Queue
 
@@ -59,9 +59,9 @@ Users holding a GPU allocation with `nvidia-smi` utilization ≤10% the longest,
 
 | User | Lab | Idle GPU-hours |
 |---|---|---:|
-| user-d58f5a15 | witter-lab | 80.3 |
-| user-0db9ced0 | zhuang-lab | 28.2 |
-| user-6bb5f332 | nerenberg-lab | 8.8 |
+| user-d58f5a15 | witter-lab | 91.8 |
+| user-0db9ced0 | zhuang-lab | 31.7 |
+| user-6bb5f332 | nerenberg-lab | 9.8 |
 | user-554c620c | witter-lab | 5.1 |
 
 ## Recommendations
