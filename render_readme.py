@@ -226,10 +226,13 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
 
 def main():
     gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
+    cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
     queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
-    queue_rows = [r for r in queue_rows_all if r.get("kind") not in ("totals", "gpu_bind")]
+    queue_rows = [r for r in queue_rows_all
+                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
     gpu_bind_rows = [r for r in queue_rows_all if r.get("kind") == "gpu_bind"]
+    job_id_map_rows = [r for r in queue_rows_all if r.get("kind") == "job_id_map"]
 
     if not gpu_rows and not queue_rows:
         (DIR / "README.md").write_text(
@@ -269,6 +272,43 @@ def main():
         r["job"], r["user"], r["lab"] = job_id, owner[0], owner[1]
         backfilled += 1
 
+    # ---- CPU utilization from cgroup accounting. cpu_samples.jsonl carries
+    # cumulative usage_usec per (node, raw cgroup job id) - the delta between
+    # consecutive samples of the same job, divided by wall-clock seconds,
+    # gives "CPU-equivalents busy" (cores kept continuously working) over
+    # that interval, the same units GPU-equivalents already uses. Job ids
+    # here are the raw cgroup id; job_id_map rows (from sample_queue.py's
+    # scontrol call) translate to the array-expanded display id everything
+    # else in this file joins on.
+    raw_to_display_by_ts = defaultdict(dict)
+    for r in job_id_map_rows:
+        raw_to_display_by_ts[r["ts"]][r["raw_id"]] = r["job_id"]
+
+    cpu_by_node_job = defaultdict(list)
+    for r in cpu_util_rows:
+        cpu_by_node_job[(r["node"], r["job_id"])].append((r["ts"], r["cpu_usage_usec"]))
+
+    cpu_equiv_by_ts_job = defaultdict(float)  # (ts, display_job_id) -> CPU-equivalents
+    for (node, raw_id), samples in cpu_by_node_job.items():
+        samples.sort(key=lambda s: parse_ts(s[0]))
+        for (t_prev, u_prev), (t_cur, u_cur) in zip(samples, samples[1:]):
+            wall_seconds = (parse_ts(t_cur) - parse_ts(t_prev)).total_seconds()
+            delta_usec = u_cur - u_prev
+            if wall_seconds <= 0 or delta_usec < 0:
+                continue  # non-positive gap, or a cgroup reset/restart - no meaningful rate
+            display_id = raw_to_display_by_ts.get(t_cur, {}).get(raw_id)
+            if not display_id:
+                continue
+            cpu_equiv_by_ts_job[(t_cur, display_id)] += delta_usec / wall_seconds / 1_000_000.0
+
+    by_ts_lab_cpu_util = defaultdict(lambda: defaultdict(float))
+    by_ts_total_cpu_util = defaultdict(float)
+    for (t, job_id), equiv in cpu_equiv_by_ts_job.items():
+        by_ts_total_cpu_util[t] += equiv
+        owner = owner_by_ts_job.get((t, job_id))
+        if owner and owner[1]:
+            by_ts_lab_cpu_util[t][owner[1]] += equiv
+
     all_labs = {r["lab"] for r in gpu_dedup if r.get("lab")} | \
                {r["lab"] for r in queue_rows if r.get("lab")}
     colors, shown = lab_palette(all_labs)
@@ -299,6 +339,14 @@ def main():
     pct_util_when_alloc = (stats.mean(r["util_gpu"] for r in allocated_gpu_readings)
                             if allocated_gpu_readings else 0.0)
 
+    cpus_alloc_by_ts_job = {(r["ts"], r["job_id"]): r["cpus"] for r in running}
+    cpu_util_fractions = []
+    for (t, job_id), equiv in cpu_equiv_by_ts_job.items():
+        cores = cpus_alloc_by_ts_job.get((t, job_id))
+        if cores:
+            cpu_util_fractions.append(100 * min(1.0, equiv / cores))
+    pct_cpu_util_when_alloc = stats.mean(cpu_util_fractions) if cpu_util_fractions else 0.0
+
     # ================= per-user / per-lab table =================
     distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows})
     intervals = interval_hours(distinct_ts)
@@ -328,13 +376,12 @@ def main():
         })
     table_rows.sort(key=lambda r: (-r["gpu_hours"]))
 
-    # ================= chart 1 & 2: CPU / GPU allocation over time, by lab,
+    # ================= chart 1 & 2: CPU / GPU allocation over time, by lab -
     #                    standardized: same title pattern, same "GPUs"/"CPUs"
     #                    axis convention, same cluster-capacity dashed
-    #                    overlay, same usage_chart() code path for both. =================
-    # CPU has no idle/utilized split - Slurm doesn't give per-job CPU
-    # utilization on this cluster (checked: `sstat` returns no CPU fields for
-    # running jobs here), only what's allocated. GPU does, from nvidia-smi.
+    #                    overlay, same usage_chart() code path, same
+    #                    utilized(solid)/idle(hatched)/unattributed(gray)
+    #                    structure, for both. =================
     alloc_by_ts_lab_gpu = defaultdict(lambda: defaultdict(int))
     alloc_by_ts_lab_cpu = defaultdict(lambda: defaultdict(int))
     for r in running:
@@ -342,14 +389,24 @@ def main():
         alloc_by_ts_lab_gpu[r["ts"]][lab] += r["gpus"]
         alloc_by_ts_lab_cpu[r["ts"]][lab] += r["cpus"]
 
-    ts_sorted_cpu = sorted({r["ts"] for r in running}, key=parse_ts)
+    ts_sorted_cpu = sorted({r["ts"] for r in running} | set(by_ts_total_cpu_util), key=parse_ts)
     x_cpu = [parse_ts(t) for t in ts_sorted_cpu]
-    labs_cpu = {lab for v in alloc_by_ts_lab_cpu.values() for lab in v}
-    series_cpu = {lab: ([alloc_by_ts_lab_cpu[t].get(lab, 0) for t in ts_sorted_cpu], None)
-                  for lab in labs_cpu}
+    labs_cpu = {lab for v in alloc_by_ts_lab_cpu.values() for lab in v} | \
+               {lab for v in by_ts_lab_cpu_util.values() for lab in v}
+    series_cpu = {}
+    for lab in labs_cpu:
+        util_list = [by_ts_lab_cpu_util[t].get(lab, 0.0) for t in ts_sorted_cpu]
+        alloc_list = [alloc_by_ts_lab_cpu.get(t, {}).get(lab, 0) for t in ts_sorted_cpu]
+        idle_list = [max(0.0, a - u) for a, u in zip(alloc_list, util_list)]
+        series_cpu[lab] = (util_list, idle_list)
+    attributed_cpu_total = {t: sum(by_ts_lab_cpu_util[t].values()) for t in ts_sorted_cpu}
+    unattrib_cpu_y = [max(0.0, by_ts_total_cpu_util.get(t, 0.0) - attributed_cpu_total[t])
+                       for t in ts_sorted_cpu]
     cap_cpu = [by_ts_totals.get(t, {}).get("cpus_total") or cpus_total for t in ts_sorted_cpu]
     usage_chart(ASSETS / "cpu_alloc.png", "CPU allocation over time (by lab)",
-                "CPUs", x_cpu, series_cpu, colors, shown, overlay_y=cap_cpu)
+                "CPUs", x_cpu, series_cpu, colors, shown,
+                unattrib_y=unattrib_cpu_y, unattrib_label="computing, unattributed",
+                overlay_y=cap_cpu)
 
     by_ts_lab_util = defaultdict(lambda: defaultdict(float))
     by_ts_total_util = defaultdict(float)
@@ -509,6 +566,8 @@ def main():
                  f"averaged across all samples")
     lines.append(f"- **{pct_util_when_alloc:.1f}%** average `nvidia-smi` utilization "
                  f"*when* a GPU is allocated to a job")
+    lines.append(f"- **{pct_cpu_util_when_alloc:.1f}%** average cgroup CPU utilization "
+                 f"*when* a CPU is allocated to a job")
     lines.append("")
     lines.append("## Per lab / per user")
     lines.append("")
@@ -538,19 +597,16 @@ def main():
     lines.append("")
     lines.append("![GPU allocation over time](assets/gpu_alloc_util.png)")
     lines.append("")
-    lines.append("Both charts share the same layout: solid color is allocation by lab, "
-                 "and the dashed line is total cluster capacity, so any gap above it is "
-                 "unallocated headroom. The GPU chart additionally splits each lab's solid "
-                 "region into *utilized* (solid) vs *allocated but idle* (same color, "
-                 "translucent + hatched) - idle capacity stays attributed to the lab "
-                 "holding it rather than one undifferentiated gray band. Solid gray on top "
-                 "is real `nvidia-smi` utilization that couldn't be traced to a job or lab. "
-                 "The CPU chart has no idle split - this cluster doesn't expose per-job CPU "
-                 "utilization (checked: `sstat` returns no CPU-time data for running jobs "
-                 "here), only what's allocated, so CPU shows allocation only. Say the word "
-                 "if you'd like real CPU-utilization telemetry added - it would need a new "
-                 "sampling step, most likely ssh + `/proc/stat` per node, similar to how "
-                 "GPU utilization is collected today.")
+    lines.append("Both charts now share the same structure: solid color is *utilized* by "
+                 "lab, translucent + hatched (same color) on top of it is that lab's "
+                 "*allocated but idle*, solid gray above that is real usage that couldn't "
+                 "be traced to a job or lab, and the dashed line is total cluster capacity "
+                 "- any gap above it is unallocated headroom. CPU utilization comes from "
+                 "cgroup v2 accounting (`cpu.stat`'s `usage_usec`, cumulative CPU time per "
+                 "job) read directly off each node, the delta between consecutive samples "
+                 "divided by wall-clock time - `sstat` returns nothing usable for this on "
+                 "this cluster, so this reads the kernel's own accounting file instead of "
+                 "going through Slurm's job-accounting plugin.")
     lines.append("")
     lines.append("Attribution is cross-referenced two ways: `nvidia-smi`'s own process "
                  "listing (misses containerized/namespaced processes - it just can't see "

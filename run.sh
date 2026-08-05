@@ -18,13 +18,17 @@ TS=$(date -Iseconds)
 echo "[$TS] run start (mode=$MODE)" >> "$LOG"
 
 # ---- GPU sampler: ssh to every node currently running a GPU job, read nvidia-smi ----
-NODES=$(squeue --state=RUNNING -h -o "%b %N" 2>>"$LOG" | awk '$1 ~ /gres\/gpu/ {print $NF}' | sort -u)
+# (drop bracket-hostlist entries like "gpu[10-14]" - squeue emits those for
+# multi-node jobs alongside the already-expanded individual node names, so
+# they're redundant and would just fail to resolve as a hostname)
+GPU_NODES=$(squeue --state=RUNNING -h -o "%b %N" 2>>"$LOG" | awk '$1 ~ /gres\/gpu/ {print $NF}' | grep -v '\[' | sort -u)
+ALL_NODES=$(squeue --state=RUNNING -h -o "%N" 2>>"$LOG" | grep -v '\[' | sort -u)
 
-if [ -z "$NODES" ]; then
+if [ -z "$GPU_NODES" ]; then
   echo "[$TS] no GPU jobs running cluster-wide right now" >> "$LOG"
 fi
 
-for n in $NODES; do
+for n in $GPU_NODES; do
   ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
     echo "--GPU--"
     nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits
@@ -40,7 +44,23 @@ for n in $NODES; do
   ' 2>>"$LOG" | python3 "$DIR/sample_gpu.py" "$TS" "$n" "$MODE" "$SALT" >> "$DATA/gpu_samples.jsonl" 2>>"$LOG"
 done
 
-# ---- queue sampler: squeue + sprio, straight from the login node, no ssh ----
+# ---- CPU sampler: ssh to every node running ANY job (GPU or not - includes
+# himem, which never shows up in GPU_NODES), read per-job cgroup CPU
+# accounting straight from cgroup v2. No process-visibility dependence, same
+# as the GPU binding cross-reference below - just cat a file the kernel
+# already maintains. ----
+for n in $ALL_NODES; do
+  ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+    for d in /sys/fs/cgroup/system.slice/slurmstepd.scope/job_*/; do
+      [ -d "$d" ] || continue
+      job=$(basename "$d"); job=${job#job_}
+      usage=$(awk "/^usage_usec/{print \$2}" "$d/cpu.stat" 2>/dev/null)
+      [ -n "$usage" ] && echo "CPUJOB $job $usage"
+    done
+  ' 2>>"$LOG" | python3 "$DIR/sample_cpu.py" "$TS" "$n" >> "$DATA/cpu_samples.jsonl" 2>>"$LOG"
+done
+
+# ---- queue sampler: squeue + sprio + scontrol, straight from the login node, no ssh ----
 python3 "$DIR/sample_queue.py" "$TS" "$MODE" "$SALT" >> "$DATA/queue_samples.jsonl" 2>>"$LOG"
 
 # ---- render README + charts on a compute node (never matplotlib on the login node) ----

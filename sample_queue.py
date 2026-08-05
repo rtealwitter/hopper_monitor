@@ -94,6 +94,27 @@ def gpu_bindings(scontrol_json):
             for idx in expand_idx(m.group(1)):
                 yield job_id, node, idx
 
+def job_id_map(scontrol_json):
+    """Yields (raw_job_id, display_job_id) for every RUNNING job. The cgroup
+    layer (job_<raw_id>/ under slurmstepd.scope - see sample_cpu.py) and
+    scontrol's own `job_id` field use the raw per-task integer id; squeue/
+    sprio (and everywhere else in this repo) use the array-expanded display
+    id ("<array_job_id>_<array_task_id>"). Used to translate sample_cpu.py's
+    cgroup-sourced job ids so they join against the rest of the data."""
+    try:
+        jobs = json.loads(scontrol_json).get("jobs", []) if scontrol_json.strip() else []
+    except json.JSONDecodeError:
+        jobs = []
+    for j in jobs:
+        if "RUNNING" not in (j.get("job_state") or []):
+            continue
+        array_task_id = j.get("array_task_id") or {}
+        if array_task_id.get("set"):
+            display_id = f"{j['array_job_id']['number']}_{array_task_id['number']}"
+        else:
+            display_id = str(j["job_id"])
+        yield str(j["job_id"]), display_id
+
 def main():
     ts, mode, salt = sys.argv[1], sys.argv[2], sys.argv[3]
     now = int(datetime.now(timezone.utc).timestamp())
@@ -139,6 +160,8 @@ def main():
         }
         print(json.dumps(row))
 
+    scontrol_out = run(["scontrol", "show", "job", "-dd", "--json"])
+
     # ---- GPU device binding: which physical (node, GPU index) each running
     # job holds, straight from Slurm's own allocation record - no ssh, and no
     # dependence on nvidia-smi seeing the job's PID (which it doesn't for
@@ -147,9 +170,15 @@ def main():
     # this against gpu_samples.jsonl's (node, gpu_idx) readings in
     # render_readme.py lets those readings be attributed even when the
     # ssh-side PID lookup in run.sh comes up empty.
-    for job_id, node, gpu_idx in gpu_bindings(run(["scontrol", "show", "job", "-dd", "--json"])):
+    for job_id, node, gpu_idx in gpu_bindings(scontrol_out):
         print(json.dumps({"kind": "gpu_bind", "ts": ts, "job_id": job_id,
                            "node": node, "gpu_idx": gpu_idx}))
+
+    # ---- raw <-> display job id translation, for joining sample_cpu.py's
+    # cgroup-sourced CPU accounting (see job_id_map() above).
+    for raw_id, display_id in job_id_map(scontrol_out):
+        print(json.dumps({"kind": "job_id_map", "ts": ts, "raw_id": raw_id,
+                           "job_id": display_id}))
 
     sinfo_out = run(["sinfo", "-h", "-o", "%D|%C|%G", "-p", "main"])
     cpus_total = gpus_total = 0
