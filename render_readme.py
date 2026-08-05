@@ -371,10 +371,17 @@ def main():
         gpu_hours_by_user_day[key] += r["gpus"] * h
         cpu_hours_by_user_day[key] += r["cpus"] * h
 
-    prio_by_user_day = defaultdict(list)
+    # Plot the *fairshare* component, not total priority. Total priority also
+    # carries the age term (PriorityWeightAge=1000, vs PriorityWeightFairShare
+    # =10000 for fairshare) - in practice, over any short window, virtually
+    # all movement in total priority comes from age (how long a job has been
+    # queued), not usage. Plotting total priority against usage mostly plots
+    # "time queued" against "usage", which swamps the actual usage effect this
+    # chart is meant to show. Fairshare is the one component usage can move.
+    fairshare_by_user_day = defaultdict(list)
     for r in queue_rows:
-        if r.get("priority") is not None and r.get("user"):
-            prio_by_user_day[(r["user"], day_of(r["ts"]))].append(r["priority"])
+        if r.get("fairshare") is not None and r.get("user"):
+            fairshare_by_user_day[(r["user"], day_of(r["ts"]))].append(r["fairshare"])
 
     usage_days = set(gpu_hours_by_user_day) | set(cpu_hours_by_user_day)
     scatter_rows = []
@@ -383,20 +390,20 @@ def main():
         ch_val = cpu_hours_by_user_day.get(key, 0.0)
         if gh_val <= 0 and ch_val <= 0:
             continue
-        prios = prio_by_user_day.get(key)
-        if prios:
-            scatter_rows.append((gh_val, ch_val, stats.mean(prios)))
+        fairshares = fairshare_by_user_day.get(key)
+        if fairshares:
+            scatter_rows.append((gh_val, ch_val, stats.mean(fairshares)))
     if scatter_rows:
         gh = [s[0] for s in scatter_rows]
         ch = [s[1] for s in scatter_rows]
-        pr = [s[2] for s in scatter_rows]
+        fs = [s[2] for s in scatter_rows]
         fig, axes = plt.subplots(1, 2, figsize=(9, 4))
-        axes[0].scatter(gh, pr, color=LAB_COLORS[0], s=40, edgecolor=SURFACE, linewidth=0.5)
-        axes[0].set_xlabel("GPU-hours allocated"); axes[0].set_ylabel("mean priority")
-        axes[0].set_title("Priority vs. GPU usage", loc="left", fontsize=11)
-        axes[1].scatter(ch, pr, color=LAB_COLORS[1], s=40, edgecolor=SURFACE, linewidth=0.5)
-        axes[1].set_xlabel("CPU-hours allocated"); axes[1].set_ylabel("mean priority")
-        axes[1].set_title("Priority vs. CPU usage", loc="left", fontsize=11)
+        axes[0].scatter(gh, fs, color=LAB_COLORS[0], s=40, edgecolor=SURFACE, linewidth=0.5)
+        axes[0].set_xlabel("GPU-hours allocated"); axes[0].set_ylabel("mean fairshare priority")
+        axes[0].set_title("Fairshare vs. GPU usage", loc="left", fontsize=11)
+        axes[1].scatter(ch, fs, color=LAB_COLORS[1], s=40, edgecolor=SURFACE, linewidth=0.5)
+        axes[1].set_xlabel("CPU-hours allocated"); axes[1].set_ylabel("mean fairshare priority")
+        axes[1].set_title("Fairshare vs. CPU usage", loc="left", fontsize=11)
         fig.tight_layout()
         fig.savefig(ASSETS / "priority_scatter.png", dpi=150)
         plt.close(fig)
@@ -471,15 +478,21 @@ def main():
         lines.append("![Queue wait time](assets/queue_wait.png)")
         lines.append("")
     if have_scatter:
-        lines.append("## Priority vs. usage")
+        lines.append("## Fairshare vs. usage")
         lines.append("")
-        lines.append("![Priority vs GPU/CPU usage](assets/priority_scatter.png)")
+        lines.append("![Fairshare vs GPU/CPU usage](assets/priority_scatter.png)")
         lines.append("")
         lines.append(f"Each point is one user on one day (n={len(scatter_rows)}): that "
-                     "day's allocated GPU/CPU-hours against their mean Slurm priority "
-                     "that same day, for everyone who ran something that day. Not a "
-                     "lifetime total per user - that would only grow and would mix "
-                     "together usage from weeks ago with today's priority.")
+                     "day's allocated GPU/CPU-hours against their mean *fairshare* "
+                     "priority component that same day, for everyone who ran something "
+                     "that day. Not a lifetime total per user - that would only grow "
+                     "and would mix together usage from weeks ago with today's fairshare. "
+                     "This plots the fairshare component specifically, not total Slurm "
+                     "priority - total priority also carries an age term "
+                     "(`PriorityWeightAge`=1000 vs `PriorityWeightFairShare`=10000) that, "
+                     "over any short window, accounts for essentially all of the movement "
+                     "in total priority regardless of usage - plotting total priority "
+                     "against usage would mostly be plotting time-in-queue against usage.")
         lines.append("")
         lines.append("**GPU usage does not currently affect priority, confirmed directly "
                      "from the Slurm config**, not just inferred from the chart shape: "

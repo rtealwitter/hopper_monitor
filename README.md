@@ -2,7 +2,7 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T08:30:16-07:00
+Last updated: 2026-08-05T08:45:17-07:00
 Samples: 3 queue snapshots, 3 GPU snapshots
 
 ## Resources
@@ -36,17 +36,17 @@ Samples: 3 queue snapshots, 3 GPU snapshots
 
 ![GPU allocation vs utilization over time](assets/gpu_alloc_util.png)
 
-The GPU chart layers three things at once: solid color is GPU-hardware utilization by lab (Σ util% across that lab's allocated GPUs), the hatched gray band on top is allocated-but-idle - GPUs a job is holding but not using - and the dashed line is total cluster GPU capacity, so any gap above the dashed line is unallocated headroom.
+The GPU chart layers four things: solid color is GPU-hardware utilization by lab (Σ util% across that lab's allocated GPUs); solid gray is real utilization `nvidia-smi` reports that couldn't be traced to a job or lab (the ssh-based PID lookup misses some processes - likely containerized ones outside its PID namespace); the hatched gray band on top of that is *actually* idle - allocated but not computing at all; and the dashed line is total cluster GPU capacity, so any gap above it is unallocated headroom.
 
 ## Queue
 
 ![Queue wait time](assets/queue_wait.png)
 
-## Priority vs. usage
+## Fairshare vs. usage
 
-![Priority vs GPU/CPU usage](assets/priority_scatter.png)
+![Fairshare vs GPU/CPU usage](assets/priority_scatter.png)
 
-Each point is one user on one day (n=3): that day's allocated GPU/CPU-hours against their mean Slurm priority that same day, for everyone who ran something that day. Not a lifetime total per user - that would only grow and would mix together usage from weeks ago with today's priority.
+Each point is one user on one day (n=3): that day's allocated GPU/CPU-hours against their mean *fairshare* priority component that same day, for everyone who ran something that day. Not a lifetime total per user - that would only grow and would mix together usage from weeks ago with today's fairshare. This plots the fairshare component specifically, not total Slurm priority - total priority also carries an age term (`PriorityWeightAge`=1000 vs `PriorityWeightFairShare`=10000) that, over any short window, accounts for essentially all of the movement in total priority regardless of usage - plotting total priority against usage would mostly be plotting time-in-queue against usage.
 
 **GPU usage does not currently affect priority, confirmed directly from the Slurm config**, not just inferred from the chart shape: `PriorityWeightTRES` is unset (a job's own GPU/CPU mix carries no weight), and partition `main` has no `TRESBillingWeights` configured, so fairshare usage accounting bills by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. If the two panels above look similarly shaped, that's this setting in action, not a coincidence.
 
