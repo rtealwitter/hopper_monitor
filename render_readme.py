@@ -304,15 +304,36 @@ def main():
         have_queue_wait = False
 
     # ================= bonus: priority vs GPU/CPU usage scatter =================
-    prio_by_user = defaultdict(list)
+    # One point per (user, day) who actually ran something that day - not a lifetime
+    # cumulative total, which would keep growing forever and drift out of sync with
+    # Slurm's own fairshare usage (which decays with a 7-day half-life, not a hard
+    # reset - see PriorityDecayHalfLife in `scontrol show config`).
+    def day_of(ts_str):
+        return parse_ts(ts_str).date()
+
+    gpu_hours_by_user_day = defaultdict(float)
+    cpu_hours_by_user_day = defaultdict(float)
+    for r in running:
+        key = (r["user"] or "unknown", day_of(r["ts"]))
+        h = intervals.get(parse_ts(r["ts"]), 0.5)
+        gpu_hours_by_user_day[key] += r["gpus"] * h
+        cpu_hours_by_user_day[key] += r["cpus"] * h
+
+    prio_by_user_day = defaultdict(list)
     for r in queue_rows:
-        if r.get("priority") is not None:
-            prio_by_user[r["user"]].append(r["priority"])
+        if r.get("priority") is not None and r.get("user"):
+            prio_by_user_day[(r["user"], day_of(r["ts"]))].append(r["priority"])
+
+    usage_days = set(gpu_hours_by_user_day) | set(cpu_hours_by_user_day)
     scatter_rows = []
-    for row in table_rows:
-        prios = prio_by_user.get(row["user"])
+    for key in usage_days:
+        gh_val = gpu_hours_by_user_day.get(key, 0.0)
+        ch_val = cpu_hours_by_user_day.get(key, 0.0)
+        if gh_val <= 0 and ch_val <= 0:
+            continue
+        prios = prio_by_user_day.get(key)
         if prios:
-            scatter_rows.append((row["gpu_hours"], row["cpu_hours"], stats.mean(prios)))
+            scatter_rows.append((gh_val, ch_val, stats.mean(prios)))
     if scatter_rows:
         gh = [s[0] for s in scatter_rows]
         ch = [s[1] for s in scatter_rows]
@@ -400,10 +421,20 @@ def main():
         lines.append("")
         lines.append("![Priority vs GPU/CPU usage](assets/priority_scatter.png)")
         lines.append("")
-        lines.append("This cluster's Slurm priority is computed from fairshare + age + "
-                     "job size (`PriorityWeightTRES` is unset), so it does not weight "
-                     "GPU-heavy usage any differently from CPU-heavy usage. If these two "
-                     "panels look similarly shaped, that confirms it in practice.")
+        lines.append(f"Each point is one user on one day (n={len(scatter_rows)}): that "
+                     "day's allocated GPU/CPU-hours against their mean Slurm priority "
+                     "that same day, for everyone who ran something that day. Not a "
+                     "lifetime total per user - that would only grow and would mix "
+                     "together usage from weeks ago with today's priority.")
+        lines.append("")
+        lines.append("**GPU usage does not currently affect priority, confirmed directly "
+                     "from the Slurm config**, not just inferred from the chart shape: "
+                     "`PriorityWeightTRES` is unset (a job's own GPU/CPU mix carries no "
+                     "weight), and partition `main` has no `TRESBillingWeights` configured, "
+                     "so fairshare usage accounting bills by CPU count alone - a job holding "
+                     "4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. "
+                     "If the two panels above look similarly shaped, that's this setting in "
+                     "action, not a coincidence.")
         lines.append("")
     if idle_leaderboard:
         lines.append("## Allocated but idle (top 10)")
@@ -416,6 +447,26 @@ def main():
         for (user, lab), h in idle_leaderboard:
             lines.append(f"| {user} | {lab} | {h:.1f} |")
         lines.append("")
+
+    lines.append("## Recommendations")
+    lines.append("")
+    lines.append("1. **Make GPU usage count toward priority.** It structurally can't "
+                 "today - see the confirmation above. Fix by setting `TRESBillingWeights` "
+                 "on the `main` partition to give GPUs a nonzero weight (e.g. "
+                 "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>`) "
+                 "and/or giving `PriorityWeightTRES` a GPU component, then restarting "
+                 "`slurmctld`. The weight value is a policy call (how many CPUs one GPU "
+                 "should be \"worth\") - not something to pick from monitoring data alone.")
+    lines.append("")
+    lines.append("2. **Act on sustained low utilization, not just report it.** The idle "
+                 "leaderboard above already identifies who's holding GPUs allocated-but-idle "
+                 "the longest. Two escalating steps on top of it: email a reminder once a "
+                 "user crosses an idle-hours threshold, and if utilization stays low after "
+                 "the reminder, taper their priority (QOS demotion or a fairshare penalty) "
+                 "rather than leaving it honor-system. Not implemented here - needs a policy "
+                 "decision first (threshold, grace period, who gets cc'd, and mail delivery "
+                 "from this host) before it's safe to automate.")
+    lines.append("")
 
     (DIR / "README.md").write_text("\n".join(lines) + "\n")
 
