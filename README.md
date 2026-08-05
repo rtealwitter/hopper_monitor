@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T06:30:16-07:00
-Samples: 22 queue snapshots, 22 GPU snapshots
+Last updated: 2026-08-05T07:00:16-07:00
+Samples: 23 queue snapshots, 23 GPU snapshots
 
 ## Resources
 
@@ -16,19 +16,19 @@ Samples: 22 queue snapshots, 22 GPU snapshots
 
 ## Headline
 
-- **83.8%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **57.5%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **83.2%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **56.5%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
 | Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |
 |---|---|---:|---:|---:|
-| witter-lab | user-d58f5a15 | 288.3 | 2306.3 | 9% |
-| zhuang-lab | user-0db9ced0 | 132.2 | 132.7 | 51% |
-| witter-lab | user-554c620c | 49.2 | 381.8 | 91% |
-| nerenberg-lab | user-6bb5f332 | 18.0 | 90.0 | 77% |
-| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 29.4 | — |
-| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 1174.8 | — |
+| witter-lab | user-d58f5a15 | 304.3 | 2434.3 | 9% |
+| zhuang-lab | user-0db9ced0 | 134.7 | 135.2 | 50% |
+| witter-lab | user-554c620c | 50.7 | 393.8 | 91% |
+| nerenberg-lab | user-6bb5f332 | 19.0 | 95.0 | 78% |
+| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 30.9 | — |
+| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 1234.8 | — |
 
 ## Usage over time
 
@@ -48,7 +48,9 @@ The third chart is GPU-hardware-utilization weighted by allocation (Σ util% acr
 
 ![Priority vs GPU/CPU usage](assets/priority_scatter.png)
 
-This cluster's Slurm priority is computed from fairshare + age + job size (`PriorityWeightTRES` is unset), so it does not weight GPU-heavy usage any differently from CPU-heavy usage. If these two panels look similarly shaped, that confirms it in practice.
+Each point is one user on one day (n=6): that day's allocated GPU/CPU-hours against their mean Slurm priority that same day, for everyone who ran something that day. Not a lifetime total per user - that would only grow and would mix together usage from weeks ago with today's priority.
+
+**GPU usage does not currently affect priority, confirmed directly from the Slurm config**, not just inferred from the chart shape: `PriorityWeightTRES` is unset (a job's own GPU/CPU mix carries no weight), and partition `main` has no `TRESBillingWeights` configured, so fairshare usage accounting bills by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. If the two panels above look similarly shaped, that's this setting in action, not a coincidence.
 
 ## Allocated but idle (top 10)
 
@@ -56,8 +58,14 @@ Users holding a GPU allocation with `nvidia-smi` utilization ≤10% the longest,
 
 | User | Lab | Idle GPU-hours |
 |---|---|---:|
-| user-0db9ced0 | zhuang-lab | 23.1 |
-| user-d58f5a15 | witter-lab | 13.6 |
+| user-0db9ced0 | zhuang-lab | 24.6 |
+| user-d58f5a15 | witter-lab | 15.1 |
 | user-6bb5f332 | nerenberg-lab | 4.5 |
 | user-554c620c | witter-lab | 2.0 |
+
+## Recommendations
+
+1. **Make GPU usage count toward priority.** It structurally can't today - see the confirmation above. Fix by setting `TRESBillingWeights` on the `main` partition to give GPUs a nonzero weight (e.g. `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>`) and/or giving `PriorityWeightTRES` a GPU component, then restarting `slurmctld`. The weight value is a policy call (how many CPUs one GPU should be "worth") - not something to pick from monitoring data alone.
+
+2. **Act on sustained low utilization, not just report it.** The idle leaderboard above already identifies who's holding GPUs allocated-but-idle the longest. Two escalating steps on top of it: email a reminder once a user crosses an idle-hours threshold, and if utilization stays low after the reminder, taper their priority (QOS demotion or a fairshare penalty) rather than leaving it honor-system. Not implemented here - needs a policy decision first (threshold, grace period, who gets cc'd, and mail delivery from this host) before it's safe to automate.
 
