@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T05:00:17-07:00
-Samples: 19 queue snapshots, 19 GPU snapshots
+Last updated: 2026-08-05T05:30:16-07:00
+Samples: 20 queue snapshots, 20 GPU snapshots
 
 ## Resources
 
@@ -16,19 +16,19 @@ Samples: 19 queue snapshots, 19 GPU snapshots
 
 ## Headline
 
-- **83.4%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **59.6%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **83.6%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **59.9%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
 | Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |
 |---|---|---:|---:|---:|
-| witter-lab | user-d58f5a15 | 250.3 | 2002.4 | 8% |
-| zhuang-lab | user-0db9ced0 | 101.7 | 102.2 | 53% |
-| witter-lab | user-554c620c | 43.2 | 333.8 | 92% |
-| nerenberg-lab | user-6bb5f332 | 15.0 | 75.0 | 78% |
-| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 994.9 | — |
-| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 24.9 | — |
+| witter-lab | user-d58f5a15 | 259.8 | 2078.3 | 8% |
+| zhuang-lab | user-0db9ced0 | 115.2 | 115.7 | 54% |
+| witter-lab | user-554c620c | 45.2 | 349.8 | 92% |
+| nerenberg-lab | user-6bb5f332 | 16.0 | 80.0 | 78% |
+| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 1054.8 | — |
+| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 26.4 | — |
 
 ## Usage over time
 
@@ -56,8 +56,8 @@ Users holding a GPU allocation with `nvidia-smi` utilization ≤10% the longest,
 
 | User | Lab | Idle GPU-hours |
 |---|---|---:|
-| user-0db9ced0 | zhuang-lab | 17.1 |
-| user-d58f5a15 | witter-lab | 10.6 |
-| user-6bb5f332 | nerenberg-lab | 3.5 |
+| user-0db9ced0 | zhuang-lab | 18.1 |
+| user-d58f5a15 | witter-lab | 11.1 |
+| user-6bb5f332 | nerenberg-lab | 4.0 |
 | user-554c620c | witter-lab | 1.5 |
 
