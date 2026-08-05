@@ -30,24 +30,19 @@ ASSETS.mkdir(exist_ok=True)
 HALF_LIFE_HOURS = 168.0
 
 # Categorical palette (fixed order, validated for CVD/contrast on the stacked-
-# area "adjacent" pairlist - see the dataviz skill). witter-lab is pinned to
-# teal/aqua specifically (by request); other labs take the remaining 7 colors
-# in fixed order by name. Extra labs beyond 8 total fold into "Other" (muted
-# gray) rather than generating a 9th hue.
+# area "adjacent" pairlist - see the dataviz skill; re-validated with this
+# exact teal via scripts/validate_palette.js after swapping it in - all
+# checks pass in this order). witter-lab is pinned to a true teal (#008080
+# reads as too gray - chroma 0.093, below the validator's floor - #009999 is
+# the nearest fully-saturated teal that still clears it) specifically by
+# request; other labs take the remaining 7 colors in fixed order by name.
+# Extra labs beyond 8 total fold into "Other" (muted gray) rather than
+# generating a 9th hue.
 WITTER_LAB = "witter-lab"
-WITTER_COLOR = "#1baf7a"
+WITTER_COLOR = "#009999"
 LAB_COLORS = ["#2a78d6", "#eb6834", "#eda100",
               "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 OTHER_COLOR = "#898781"
-# Nearest colored-square emoji per hex - a zero-dependency color cue for the
-# README table that renders identically everywhere (GitHub strips inline CSS
-# from README HTML, so this is the reliable channel; the light background
-# tint below is a bonus if it survives, not the thing being relied on).
-LAB_EMOJI = {
-    WITTER_COLOR: "\U0001F7E9", "#2a78d6": "\U0001F7E6", "#eb6834": "\U0001F7E7",
-    "#eda100": "\U0001F7E8", "#e87ba4": "\U0001F7EA", "#008300": "\U0001F7EB",
-    "#4a3aa7": "⬛", "#e34948": "\U0001F7E5", OTHER_COLOR: "⬜",
-}
 # "Computing, unattributed" band: real nvidia-smi utilization that couldn't be
 # joined to a job/lab (the ssh-based PID lookup misses some processes - see
 # README note). Not lab-colored since we don't know which lab it belongs to.
@@ -137,6 +132,21 @@ def interval_hours(sorted_distinct_ts):
         intervals[sorted_distinct_ts[i]] = d
     intervals[sorted_distinct_ts[-1]] = stats.median(deltas) if deltas else 0.5
     return intervals
+
+
+def percentile(sorted_vals, p):
+    """Linear-interpolation percentile (the "linear" method numpy/Excel use
+    by default). Monotonic in p by construction - p90 can never fall below
+    p50 for the same data, unlike `sorted_vals[int(p/100 * (n-1))]`, which at
+    small n rounds toward the wrong end: for n=2 it's `int(0.9*1)=0`, i.e.
+    "p90" silently becomes the *smaller* of the two values."""
+    n = len(sorted_vals)
+    if n == 1:
+        return sorted_vals[0]
+    idx = (p / 100) * (n - 1)
+    lo = int(idx)
+    hi = min(lo + 1, n - 1)
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
 
 def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
@@ -384,8 +394,8 @@ def main():
     if by_ts_wait:
         ts_sorted4 = sorted(by_ts_wait, key=parse_ts)
         x4 = [parse_ts(t) for t in ts_sorted4]
-        med = [stats.median(by_ts_wait[t]) for t in ts_sorted4]
-        p90 = [sorted(by_ts_wait[t])[int(0.9 * (len(by_ts_wait[t]) - 1))] for t in ts_sorted4]
+        med = [percentile(sorted(by_ts_wait[t]), 50) for t in ts_sorted4]
+        p90 = [percentile(sorted(by_ts_wait[t]), 90) for t in ts_sorted4]
         fig, ax = plt.subplots(figsize=(9, 4))
         ax.plot(x4, med, color=LAB_COLORS[0], linewidth=2, marker="o", markersize=4,
                  label="median wait")
@@ -509,18 +519,18 @@ def main():
         util = f"{row['util_pct']:.0f}%" if row["util_pct"] is not None else "—"
         color = colors.get(row["lab"], OTHER_COLOR)
         bg = lighten(color)
-        emoji = LAB_EMOJI.get(color, "")
         lines.append(f"<tr style='background-color:{bg}'>"
-                     f"<td>{emoji} {row['lab']}</td><td>{row['user']}</td>"
+                     f"<td>{row['lab']}</td><td>{row['user']}</td>"
                      f"<td align='right'>{row['gpu_hours']:.1f}</td>"
                      f"<td align='right'>{row['cpu_hours']:.1f}</td>"
                      f"<td align='right'>{util}</td></tr>")
     lines.append("</table>")
     lines.append("")
-    lines.append("(Row background is each lab's chart color, lightened - GitHub strips the "
-                 "inline CSS that carries it, confirmed against the live rendered page, so "
-                 "on github.com the colored square is what you'll actually see; the tint is "
-                 "there for other renderers, e.g. an editor's local Markdown preview.)")
+    lines.append("(Row background is each lab's chart color, lightened, matching the charts "
+                 "above - GitHub strips the inline CSS that carries it (confirmed against the "
+                 "live rendered page), so on github.com this table renders plain; the tint "
+                 "shows in renderers that keep inline styles, e.g. an editor's local Markdown "
+                 "preview.)")
     lines.append("")
     lines.append("## Usage over time")
     lines.append("")

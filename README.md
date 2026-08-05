@@ -2,7 +2,7 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T14:11:35-07:00
+Last updated: 2026-08-05T14:21:36-07:00
 Samples: 12 queue snapshots, 12 GPU snapshots
 
 ## Resources
@@ -23,17 +23,17 @@ Samples: 12 queue snapshots, 12 GPU snapshots
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
-<tr style='background-color:#dcf3eb'><td>🟩 witter-lab</td><td>user-d58f5a15</td><td align='right'>167.6</td><td align='right'>1340.7</td><td align='right'>7%</td></tr>
-<tr style='background-color:#fbebf1'><td>🟪 zhuang-lab</td><td>user-0db9ced0</td><td align='right'>82.4</td><td align='right'>82.4</td><td align='right'>45%</td></tr>
-<tr style='background-color:#dcf3eb'><td>🟩 witter-lab</td><td>user-554c620c</td><td align='right'>18.5</td><td align='right'>91.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#fcf0d8'><td>🟨 nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>11.0</td><td align='right'>55.0</td><td align='right'>72%</td></tr>
-<tr style='background-color:#dfeaf8'><td>🟦 enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>12.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>🟧 ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>660.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>🟨 nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>81.5</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>🟧 ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>173.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>167.6</td><td align='right'>1340.7</td><td align='right'>7%</td></tr>
+<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>82.4</td><td align='right'>82.4</td><td align='right'>45%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>18.5</td><td align='right'>91.0</td><td align='right'>71%</td></tr>
+<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>11.0</td><td align='right'>55.0</td><td align='right'>72%</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>173.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>660.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>81.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>12.0</td><td align='right'>—</td></tr>
 </table>
 
-(Row background is each lab's chart color, lightened - GitHub strips the inline CSS that carries it, confirmed against the live rendered page, so on github.com the colored square is what you'll actually see; the tint is there for other renderers, e.g. an editor's local Markdown preview.)
+(Row background is each lab's chart color, lightened, matching the charts above - GitHub strips the inline CSS that carries it (confirmed against the live rendered page), so on github.com this table renders plain; the tint shows in renderers that keep inline styles, e.g. an editor's local Markdown preview.)
 
 ## Usage over time
 
