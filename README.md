@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T01:00:17-07:00
-Samples: 11 queue snapshots, 11 GPU snapshots
+Last updated: 2026-08-05T01:30:16-07:00
+Samples: 12 queue snapshots, 12 GPU snapshots
 
 ## Resources
 
@@ -16,19 +16,19 @@ Samples: 11 queue snapshots, 11 GPU snapshots
 
 ## Headline
 
-- **84.5%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **52.8%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **84.7%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **55.5%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
 | Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |
 |---|---|---:|---:|---:|
-| witter-lab | user-d58f5a15 | 135.8 | 1086.3 | 8% |
-| zhuang-lab | user-0db9ced0 | 48.7 | 48.7 | 54% |
-| witter-lab | user-554c620c | 22.2 | 165.8 | 94% |
-| nerenberg-lab | user-6bb5f332 | 7.0 | 35.0 | 75% |
-| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 514.8 | — |
-| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 12.9 | — |
+| witter-lab | user-d58f5a15 | 150.8 | 1206.3 | 8% |
+| zhuang-lab | user-0db9ced0 | 55.2 | 55.2 | 56% |
+| witter-lab | user-554c620c | 25.7 | 193.8 | 94% |
+| nerenberg-lab | user-6bb5f332 | 8.0 | 40.0 | 76% |
+| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 14.4 | — |
+| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 574.8 | — |
 
 ## Usage over time
 
