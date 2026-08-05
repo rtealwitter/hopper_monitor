@@ -182,8 +182,9 @@ def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
 def main():
     gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
     queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
-    queue_rows = [r for r in queue_rows_all if r.get("kind") != "totals"]
+    queue_rows = [r for r in queue_rows_all if r.get("kind") not in ("totals", "gpu_bind")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
+    gpu_bind_rows = [r for r in queue_rows_all if r.get("kind") == "gpu_bind"]
 
     if not gpu_rows and not queue_rows:
         (DIR / "README.md").write_text(
@@ -200,6 +201,28 @@ def main():
         if key not in by_key or (r.get("job") and not by_key[key].get("job")):
             by_key[key] = r
     gpu_dedup = list(by_key.values())
+
+    # ---- backfill job/user/lab using Slurm's own GPU binding record, for
+    # readings the ssh-based PID lookup in run.sh couldn't attribute (misses
+    # containerized/namespaced processes - nvidia-smi's process query just
+    # doesn't see them, even though the GPU is genuinely busy). scontrol
+    # always knows which (node, GPU index) it handed to which job, so this
+    # doesn't depend on process visibility at all - see sample_queue.py's
+    # gpu_bindings(). Only fills gaps; an existing PID-based attribution is
+    # left as-is. ----
+    bind_job_by_key = {(r["ts"], r["node"], r["gpu_idx"]): r["job_id"] for r in gpu_bind_rows}
+    owner_by_ts_job = {(r["ts"], r["job_id"]): (r.get("user"), r.get("lab"))
+                        for r in queue_rows if r.get("job_id")}
+    backfilled = 0
+    for r in gpu_dedup:
+        if r.get("job"):
+            continue
+        job_id = bind_job_by_key.get((r["ts"], r["node"], r["gpu_idx"]))
+        owner = owner_by_ts_job.get((r["ts"], job_id)) if job_id else None
+        if not owner:
+            continue
+        r["job"], r["user"], r["lab"] = job_id, owner[0], owner[1]
+        backfilled += 1
 
     all_labs = {r["lab"] for r in gpu_dedup if r.get("lab")} | \
                {r["lab"] for r in queue_rows if r.get("lab")}
@@ -466,11 +489,21 @@ def main():
     lines.append("The GPU chart layers four things: solid color is GPU-hardware "
                  "utilization by lab (Σ util% across that lab's allocated GPUs); solid "
                  "gray is real utilization `nvidia-smi` reports that couldn't be traced "
-                 "to a job or lab (the ssh-based PID lookup misses some processes - "
-                 "likely containerized ones outside its PID namespace); the hatched gray "
-                 "band on top of that is *actually* idle - allocated but not computing "
-                 "at all; and the dashed line is total cluster GPU capacity, so any gap "
-                 "above it is unallocated headroom.")
+                 "to a job or lab; the hatched gray band on top of that is *actually* "
+                 "idle - allocated but not computing at all; and the dashed line is "
+                 "total cluster GPU capacity, so any gap above it is unallocated "
+                 "headroom.")
+    lines.append("")
+    lines.append("Attribution is cross-referenced two ways: `nvidia-smi`'s own process "
+                 "listing (misses containerized/namespaced processes - it just can't see "
+                 "those PIDs), backfilled from Slurm's own GPU-to-job binding record "
+                 "(`scontrol show job -dd`, which doesn't depend on process visibility at "
+                 "all - it's the scheduler's own allocation, not an inference from what a "
+                 "node will show over ssh). "
+                 + (f"The scontrol fallback attributed **{backfilled}** GPU readings this "
+                    "run that the process-listing path missed." if backfilled else
+                    "No readings needed the fallback this run - process-listing "
+                    "attribution covered everything."))
     lines.append("")
     if have_queue_wait:
         lines.append("## Queue")

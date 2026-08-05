@@ -5,16 +5,22 @@ same class of read as `squeue --user $USER`. Appends one JSON line per job (pend
 or running) plus one "totals" line for cluster-wide CPU/GPU capacity, to stdout
 (redirected to data/queue_samples.jsonl by the caller).
 
-Two Slurm CLIs, joined by job id:
-  squeue - per-job user/state/cpus/gpus/node/submit-and-start times
-  sprio  - per-job priority and its age/fairshare/jobsize/partition components
-           (PriorityWeightTRES is unset on this cluster, so none of these
-           components are GPU-aware - see README for what that means in practice)
+Three Slurm CLIs, joined by job id:
+  squeue   - per-job user/state/cpus/gpus/node/submit-and-start times
+  sprio    - per-job priority and its age/fairshare/jobsize/partition components
+             (PriorityWeightTRES is unset on this cluster, so none of these
+             components are GPU-aware - see README for what that means in practice)
+  scontrol - per-job physical GPU binding (node + device index), emitted as
+             separate "gpu_bind" rows and cross-referenced against
+             gpu_samples.jsonl in render_readme.py, since nvidia-smi's own
+             process listing (used by sample_gpu.py) misses containerized/
+             namespaced processes and can't attribute them on its own.
 
 Lab is resolved the same way as sample_gpu.py: the caller's Unix group ending in
 "-lab", via `id -Gn` (works fine from the login node, no ssh required). If
 MODE=anon_users, the user field is hashed into a stable pseudonym; lab stays real.
 """
+import re
 import sys
 import json
 import subprocess
@@ -44,6 +50,49 @@ def lab_of(user):
         groups = run(["id", "-Gn", user]).split()
         _lab_cache[user] = next((g for g in groups if g.endswith("-lab")), None)
     return _lab_cache[user]
+
+def expand_idx(idx_expr):
+    """'0-1,3' -> [0, 1, 3]"""
+    out = []
+    for part in idx_expr.split(","):
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-")
+            out.extend(range(int(a), int(b) + 1))
+        else:
+            out.append(int(part))
+    return out
+
+def gpu_bindings(scontrol_json):
+    """Yields (job_id, node, gpu_idx) for every physical GPU every RUNNING
+    job holds, parsed from `scontrol show job -dd --json`'s gres_detail
+    (one entry per node, e.g. "gpu:l40s:2(IDX:0-1)"), zipped against
+    job_resources.allocated_nodes (same order). job_id matches the format
+    squeue/sprio use for array tasks ("<array_job_id>_<array_task_id>")."""
+    try:
+        jobs = json.loads(scontrol_json).get("jobs", []) if scontrol_json.strip() else []
+    except json.JSONDecodeError:
+        jobs = []
+    for j in jobs:
+        if "RUNNING" not in (j.get("job_state") or []):
+            continue
+        gres_detail = j.get("gres_detail") or []
+        nodes = (j.get("job_resources") or {}).get("allocated_nodes") or []
+        if not gres_detail or len(gres_detail) != len(nodes):
+            continue
+        array_task_id = j.get("array_task_id") or {}
+        if array_task_id.get("set"):
+            job_id = f"{j['array_job_id']['number']}_{array_task_id['number']}"
+        else:
+            job_id = str(j["job_id"])
+        for node_info, gres in zip(nodes, gres_detail):
+            node = node_info.get("nodename")
+            m = re.search(r"IDX:([0-9,\-]+)", gres)
+            if not node or not m:
+                continue
+            for idx in expand_idx(m.group(1)):
+                yield job_id, node, idx
 
 def main():
     ts, mode, salt = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -89,6 +138,18 @@ def main():
             "fairshare": p.get("fairshare"), "jobsize": p.get("jobsize"),
         }
         print(json.dumps(row))
+
+    # ---- GPU device binding: which physical (node, GPU index) each running
+    # job holds, straight from Slurm's own allocation record - no ssh, and no
+    # dependence on nvidia-smi seeing the job's PID (which it doesn't for
+    # containerized/namespaced processes - the gap the "computing,
+    # unattributed" band in the README exists to catch). Cross-referencing
+    # this against gpu_samples.jsonl's (node, gpu_idx) readings in
+    # render_readme.py lets those readings be attributed even when the
+    # ssh-side PID lookup in run.sh comes up empty.
+    for job_id, node, gpu_idx in gpu_bindings(run(["scontrol", "show", "job", "-dd", "--json"])):
+        print(json.dumps({"kind": "gpu_bind", "ts": ts, "job_id": job_id,
+                           "node": node, "gpu_idx": gpu_idx}))
 
     sinfo_out = run(["sinfo", "-h", "-o", "%D|%C|%G", "-p", "main"])
     cpus_total = gpus_total = 0
