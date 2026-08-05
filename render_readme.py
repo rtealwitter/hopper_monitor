@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""
+Reads data/gpu_samples.jsonl (nvidia-smi, via ssh to GPU nodes) and
+data/queue_samples.jsonl (squeue + sprio, login node only) and writes
+assets/*.png + README.md. Runs on a compute node via `sbatch --wait` from
+run.sh - never on the login node (no numpy/matplotlib there).
+
+No pandas - stdlib json/statistics/collections only, matching the rest of this
+repo's minimalism.
+"""
+import json
+import statistics as stats
+from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+DIR = Path(__file__).resolve().parent
+ASSETS = DIR / "assets"
+ASSETS.mkdir(exist_ok=True)
+
+IDLE_THRESHOLD = 10.0  # util_gpu <= this counts as idle
+
+# Categorical palette (fixed order, validated for CVD/contrast on the stacked-
+# area "adjacent" pairlist - see the dataviz skill). Extra labs beyond 8 fold
+# into "Other" (muted gray) rather than generating a 9th hue.
+LAB_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+              "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+OTHER_COLOR = "#898781"
+INK = "#0b0b0b"
+INK_SECONDARY = "#52514e"
+INK_MUTED = "#898781"
+GRID = "#e1e0d9"
+SURFACE = "#fcfcfb"
+
+plt.rcParams.update({
+    "figure.facecolor": SURFACE, "axes.facecolor": SURFACE,
+    "axes.edgecolor": INK_MUTED, "axes.labelcolor": INK_SECONDARY,
+    "text.color": INK, "xtick.color": INK_MUTED, "ytick.color": INK_MUTED,
+    "grid.color": GRID, "font.size": 10, "axes.grid": True,
+    "grid.linewidth": 0.6, "axes.spines.top": False, "axes.spines.right": False,
+})
+
+
+def load_jsonl(path):
+    rows = []
+    if not path.exists():
+        return rows
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
+def parse_ts(ts):
+    return datetime.fromisoformat(ts)
+
+
+def lab_palette(labs):
+    """Fixed-order hue assignment; labs beyond 8 fold into 'Other'."""
+    ranked = sorted(labs)
+    colors = {}
+    shown = ranked[:8]
+    for lab, color in zip(shown, LAB_COLORS):
+        colors[lab] = color
+    for lab in ranked[8:]:
+        colors[lab] = OTHER_COLOR
+    return colors, set(shown)
+
+
+def bucket_label(lab, shown):
+    return lab if lab in shown else "Other"
+
+
+def interval_hours(sorted_distinct_ts):
+    """Wall-clock hours each sample timestamp represents, for GPU/CPU-hour
+    integration - the gap to the next sample, falling back to the median gap
+    for the final (still-open) sample."""
+    if not sorted_distinct_ts:
+        return {}
+    deltas = []
+    intervals = {}
+    for i in range(len(sorted_distinct_ts) - 1):
+        d = (sorted_distinct_ts[i + 1] - sorted_distinct_ts[i]).total_seconds() / 3600
+        deltas.append(d)
+        intervals[sorted_distinct_ts[i]] = d
+    intervals[sorted_distinct_ts[-1]] = stats.median(deltas) if deltas else 0.5
+    return intervals
+
+
+def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
+                  overlay_x=None, overlay_y=None, overlay_label=None):
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    labs = sorted(y_by_lab, key=lambda l: -sum(y_by_lab[l]))
+    single_point = len(x_by_lab) < 2
+    if labs:
+        if single_point:
+            # stackplot needs >=2 x points to draw a visible fill (zero width
+            # otherwise) - render the one sample as a stacked bar instead.
+            bottom = 0
+            for l in labs:
+                v = y_by_lab[l][0]
+                ax.bar(x_by_lab[0], v, bottom=bottom, width=0.01,
+                       color=colors[l], label=bucket_label(l, shown))
+                bottom += v
+        else:
+            ax.stackplot(x_by_lab, *[y_by_lab[l] for l in labs],
+                          labels=[bucket_label(l, shown) for l in labs],
+                          colors=[colors[l] for l in labs], linewidth=0)
+    if overlay_x is not None and overlay_y:
+        if len(overlay_x) < 2:
+            ax.scatter(overlay_x, overlay_y, color=INK_MUTED, marker="_", s=300,
+                        linewidth=1.5, label=overlay_label)
+        else:
+            ax.plot(overlay_x, overlay_y, color=INK_MUTED, linewidth=1.5,
+                     linestyle="--", label=overlay_label)
+    # explicit x-limits - matplotlib's date autoscale degenerates to a huge
+    # bogus range (e.g. year 1 CE) when there are fewer than 2 x points.
+    all_x = list(x_by_lab) + (list(overlay_x) if overlay_x else [])
+    if all_x:
+        lo, hi = min(all_x), max(all_x)
+        pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
+        ax.set_xlim(lo - pad, hi + pad)
+    ax.set_title(title, color=INK, fontsize=12, loc="left")
+    ax.set_ylabel(ylabel)
+    tz = all_x[0].tzinfo if all_x else None
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=tz))
+    fig.autofmt_xdate()
+    if labs or overlay_x is not None:
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False,
+                   fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def main():
+    gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
+    queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
+    queue_rows = [r for r in queue_rows_all if r.get("kind") != "totals"]
+    totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
+
+    if not gpu_rows and not queue_rows:
+        (DIR / "README.md").write_text(
+            "# hopper_monitor\n\nNo samples recorded yet - check back after "
+            "the next 30-minute cron tick.\n"
+        )
+        return
+
+    # ---- dedupe GPU readings to one row per (ts, node, gpu_idx) ----
+    by_key = {}
+    for r in gpu_rows:
+        key = (r["ts"], r["node"], r["gpu_idx"])
+        # prefer the row that carries an attributed job, if any duplicate exists
+        if key not in by_key or (r.get("job") and not by_key[key].get("job")):
+            by_key[key] = r
+    gpu_dedup = list(by_key.values())
+
+    all_labs = {r["lab"] for r in gpu_dedup if r.get("lab")} | \
+               {r["lab"] for r in queue_rows if r.get("lab")}
+    colors, shown = lab_palette(all_labs)
+
+    # ================= headline stats =================
+    latest_totals = totals_rows[-1] if totals_rows else {"cpus_total": 0, "gpus_total": 0}
+    gpus_total = latest_totals["gpus_total"] or 1
+    cpus_total = latest_totals["cpus_total"] or 1
+
+    by_ts_totals = defaultdict(lambda: {"cpus_total": 0, "gpus_total": 0})
+    for r in totals_rows:
+        by_ts_totals[r["ts"]] = r
+
+    running = [r for r in queue_rows if r["state"] == "RUNNING"]
+    gpus_alloc_by_ts = defaultdict(int)
+    cpus_alloc_by_ts = defaultdict(int)
+    for r in running:
+        gpus_alloc_by_ts[r["ts"]] += r["gpus"]
+        cpus_alloc_by_ts[r["ts"]] += r["cpus"]
+
+    pct_gpu_alloc_samples = []
+    for ts, g in gpus_alloc_by_ts.items():
+        tot = by_ts_totals.get(ts, {}).get("gpus_total") or gpus_total
+        pct_gpu_alloc_samples.append(100 * g / tot)
+    pct_gpu_alloc = stats.mean(pct_gpu_alloc_samples) if pct_gpu_alloc_samples else 0.0
+
+    allocated_gpu_readings = [r for r in gpu_dedup if r.get("job")]
+    pct_util_when_alloc = (stats.mean(r["util_gpu"] for r in allocated_gpu_readings)
+                            if allocated_gpu_readings else 0.0)
+
+    # ================= per-user / per-lab table =================
+    distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows})
+    intervals = interval_hours(distinct_ts)
+
+    gpu_hours = defaultdict(float)
+    cpu_hours = defaultdict(float)
+    user_lab = {}
+    for r in running:
+        key = (r["user"] or "unknown", r["lab"] or "unknown")
+        h = intervals.get(parse_ts(r["ts"]), 0.5)
+        gpu_hours[key] += r["gpus"] * h
+        cpu_hours[key] += r["cpus"] * h
+        user_lab[key] = key
+
+    util_by_user = defaultdict(list)
+    for r in gpu_dedup:
+        if r.get("user"):
+            util_by_user[(r["user"], r.get("lab") or "unknown")].append(r["util_gpu"])
+
+    table_keys = set(gpu_hours) | set(cpu_hours) | set(util_by_user)
+    table_rows = []
+    for key in table_keys:
+        user, lab = key
+        table_rows.append({
+            "lab": lab, "user": user,
+            "gpu_hours": gpu_hours.get(key, 0.0),
+            "cpu_hours": cpu_hours.get(key, 0.0),
+            "util_pct": stats.mean(util_by_user[key]) if util_by_user.get(key) else None,
+        })
+    table_rows.sort(key=lambda r: (-r["gpu_hours"]))
+
+    # ================= chart 1 & 2: CPU / GPU allocated over time, stacked by lab =================
+    def alloc_series(field, totals_key, fallback_total):
+        by_ts_lab = defaultdict(lambda: defaultdict(int))
+        for r in running:
+            by_ts_lab[r["ts"]][r["lab"] or "unknown"] += r[field]
+        ts_sorted = sorted(by_ts_lab, key=parse_ts)
+        x = [parse_ts(t) for t in ts_sorted]
+        y_by_lab = defaultdict(list)
+        labs_here = {lab for v in by_ts_lab.values() for lab in v}
+        for t in ts_sorted:
+            for lab in labs_here:
+                y_by_lab[lab].append(by_ts_lab[t].get(lab, 0))
+        total_y = [by_ts_totals.get(t, {}).get(totals_key) or fallback_total
+                   for t in ts_sorted]
+        return x, y_by_lab, total_y
+
+    x_cpu, y_cpu, total_cpu = alloc_series("cpus", "cpus_total", cpus_total)
+    stacked_area(ASSETS / "cpu_alloc.png", "CPUs allocated over time (by lab)",
+                 "CPUs allocated", x_cpu, y_cpu, colors, shown,
+                 x_cpu, total_cpu, "cluster capacity")
+
+    x_gpu, y_gpu, total_gpu_cap = alloc_series("gpus", "gpus_total", gpus_total)
+    stacked_area(ASSETS / "gpu_alloc.png", "GPUs allocated over time (by lab)",
+                 "GPUs allocated", x_gpu, y_gpu, colors, shown,
+                 x_gpu, total_gpu_cap, "cluster capacity")
+
+    # ================= chart 3: GPU-equivalents actively computing, stacked by lab =================
+    by_ts_lab_util = defaultdict(lambda: defaultdict(float))
+    by_ts_alloc_count = defaultdict(int)
+    for r in gpu_dedup:
+        by_ts_alloc_count[r["ts"]] += 1 if r.get("job") else 0
+        if r.get("job") and r.get("lab"):
+            by_ts_lab_util[r["ts"]][r["lab"]] += r["util_gpu"] / 100.0
+    ts_sorted3 = sorted(by_ts_lab_util, key=parse_ts)
+    x3 = [parse_ts(t) for t in ts_sorted3]
+    labs3 = {lab for v in by_ts_lab_util.values() for lab in v}
+    y3 = defaultdict(list)
+    for t in ts_sorted3:
+        for lab in labs3:
+            y3[lab].append(by_ts_lab_util[t].get(lab, 0.0))
+    total_alloc3 = [by_ts_alloc_count[t] for t in ts_sorted3]
+    stacked_area(ASSETS / "gpu_util.png",
+                 "GPU-equivalents actively computing over time (by lab)",
+                 "GPU-equivalents (Σ util% × allocated GPUs)",
+                 x3, y3, colors, shown, x3, total_alloc3, "GPUs allocated")
+
+    # ================= bonus: queue wait time trend =================
+    pending = [r for r in queue_rows if r["state"] == "PENDING" and r["wait_seconds"] is not None]
+    by_ts_wait = defaultdict(list)
+    for r in pending:
+        by_ts_wait[r["ts"]].append(r["wait_seconds"] / 3600.0)
+    if by_ts_wait:
+        ts_sorted4 = sorted(by_ts_wait, key=parse_ts)
+        x4 = [parse_ts(t) for t in ts_sorted4]
+        med = [stats.median(by_ts_wait[t]) for t in ts_sorted4]
+        p90 = [sorted(by_ts_wait[t])[int(0.9 * (len(by_ts_wait[t]) - 1))] for t in ts_sorted4]
+        fig, ax = plt.subplots(figsize=(9, 4))
+        ax.plot(x4, med, color=LAB_COLORS[0], linewidth=2, marker="o", markersize=4,
+                 label="median wait")
+        ax.plot(x4, p90, color=LAB_COLORS[1], linewidth=1.5, linestyle="--",
+                 marker="o", markersize=4, label="p90 wait")
+        lo, hi = min(x4), max(x4)
+        pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
+        ax.set_xlim(lo - pad, hi + pad)
+        ax.set_title("Queue wait time (currently-pending jobs)", loc="left")
+        ax.set_ylabel("hours waited so far")
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=x4[0].tzinfo))
+        fig.autofmt_xdate()
+        ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(ASSETS / "queue_wait.png", dpi=150)
+        plt.close(fig)
+        have_queue_wait = True
+    else:
+        have_queue_wait = False
+
+    # ================= bonus: priority vs GPU/CPU usage scatter =================
+    prio_by_user = defaultdict(list)
+    for r in queue_rows:
+        if r.get("priority") is not None:
+            prio_by_user[r["user"]].append(r["priority"])
+    scatter_rows = []
+    for row in table_rows:
+        prios = prio_by_user.get(row["user"])
+        if prios:
+            scatter_rows.append((row["gpu_hours"], row["cpu_hours"], stats.mean(prios)))
+    if scatter_rows:
+        gh = [s[0] for s in scatter_rows]
+        ch = [s[1] for s in scatter_rows]
+        pr = [s[2] for s in scatter_rows]
+        fig, axes = plt.subplots(1, 2, figsize=(9, 4))
+        axes[0].scatter(gh, pr, color=LAB_COLORS[0], s=40, edgecolor=SURFACE, linewidth=0.5)
+        axes[0].set_xlabel("GPU-hours allocated"); axes[0].set_ylabel("mean priority")
+        axes[0].set_title("Priority vs. GPU usage", loc="left", fontsize=11)
+        axes[1].scatter(ch, pr, color=LAB_COLORS[1], s=40, edgecolor=SURFACE, linewidth=0.5)
+        axes[1].set_xlabel("CPU-hours allocated"); axes[1].set_ylabel("mean priority")
+        axes[1].set_title("Priority vs. CPU usage", loc="left", fontsize=11)
+        fig.tight_layout()
+        fig.savefig(ASSETS / "priority_scatter.png", dpi=150)
+        plt.close(fig)
+        have_scatter = True
+    else:
+        have_scatter = False
+
+    # ================= bonus: allocated-but-idle leaderboard =================
+    idle_hours = defaultdict(float)
+    for r in gpu_dedup:
+        if r.get("job") and r.get("user") and r["util_gpu"] <= IDLE_THRESHOLD:
+            h = intervals.get(parse_ts(r["ts"]), 0.5)
+            idle_hours[(r["user"], r.get("lab") or "unknown")] += h
+    idle_leaderboard = sorted(idle_hours.items(), key=lambda kv: -kv[1])[:10]
+
+    # ================= write README =================
+    lines = []
+    lines.append("# hopper_monitor")
+    lines.append("")
+    lines.append("Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, "
+                 "updated every 30 minutes by cron. Usernames are anonymized to a "
+                 "stable per-account pseudonym; lab names are real.")
+    lines.append("")
+    lines.append(f"Last updated: {datetime.now().astimezone().isoformat(timespec='seconds')}")
+    lines.append(f"Samples: {len(distinct_ts)} queue snapshots, "
+                 f"{len({r['ts'] for r in gpu_dedup})} GPU snapshots")
+    lines.append("")
+    lines.append("## Resources")
+    lines.append("")
+    lines.append(f"`hopper.cluster` currently reports **{gpus_total} GPUs** and "
+                 f"**{cpus_total} CPUs** total:")
+    lines.append("")
+    lines.append("| Nodes | Count | CPUs/node | RAM/node | GPUs/node |")
+    lines.append("|---|---:|---:|---:|---|")
+    lines.append("| `gpu01`-`gpu15` | 15 | 128 | 750 GB | 4× NVIDIA L40S (48 GB VRAM) |")
+    lines.append("| `himem01`-`himem02` | 2 | 128 | 3000 GB | none |")
+    lines.append("")
+    lines.append("## Headline")
+    lines.append("")
+    lines.append(f"- **{pct_gpu_alloc:.1f}%** of the cluster's {gpus_total} GPUs allocated, "
+                 f"averaged across all samples")
+    lines.append(f"- **{pct_util_when_alloc:.1f}%** average `nvidia-smi` utilization "
+                 f"*when* a GPU is allocated to a job")
+    lines.append("")
+    lines.append("## Per lab / per user")
+    lines.append("")
+    lines.append("| Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |")
+    lines.append("|---|---|---:|---:|---:|")
+    for row in table_rows:
+        util = f"{row['util_pct']:.0f}%" if row["util_pct"] is not None else "—"
+        lines.append(f"| {row['lab']} | {row['user']} | {row['gpu_hours']:.1f} | "
+                     f"{row['cpu_hours']:.1f} | {util} |")
+    lines.append("")
+    lines.append("## Usage over time")
+    lines.append("")
+    lines.append("![CPUs allocated over time](assets/cpu_alloc.png)")
+    lines.append("")
+    lines.append("![GPUs allocated over time](assets/gpu_alloc.png)")
+    lines.append("")
+    lines.append("![GPU utilization over time](assets/gpu_util.png)")
+    lines.append("")
+    lines.append("The third chart is GPU-hardware-utilization weighted by allocation "
+                 "(Σ util% across allocated GPUs), stacked by lab, with the dashed "
+                 "line showing how many GPUs were allocated at that moment. The gap "
+                 "between the stack and the dashed line is allocated-but-idle capacity.")
+    lines.append("")
+    if have_queue_wait:
+        lines.append("## Queue")
+        lines.append("")
+        lines.append("![Queue wait time](assets/queue_wait.png)")
+        lines.append("")
+    if have_scatter:
+        lines.append("## Priority vs. usage")
+        lines.append("")
+        lines.append("![Priority vs GPU/CPU usage](assets/priority_scatter.png)")
+        lines.append("")
+        lines.append("This cluster's Slurm priority is computed from fairshare + age + "
+                     "job size (`PriorityWeightTRES` is unset), so it does not weight "
+                     "GPU-heavy usage any differently from CPU-heavy usage. If these two "
+                     "panels look similarly shaped, that confirms it in practice.")
+        lines.append("")
+    if idle_leaderboard:
+        lines.append("## Allocated but idle (top 10)")
+        lines.append("")
+        lines.append(f"Users holding a GPU allocation with `nvidia-smi` utilization "
+                     f"≤{IDLE_THRESHOLD:.0f}% the longest, cumulatively:")
+        lines.append("")
+        lines.append("| User | Lab | Idle GPU-hours |")
+        lines.append("|---|---|---:|")
+        for (user, lab), h in idle_leaderboard:
+            lines.append(f"| {user} | {lab} | {h:.1f} |")
+        lines.append("")
+
+    (DIR / "README.md").write_text("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    main()
