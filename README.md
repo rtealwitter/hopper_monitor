@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T14:00:17-07:00
-Samples: 15 queue snapshots, 15 GPU snapshots
+Last updated: 2026-08-05T14:08:55-07:00
+Samples: 12 queue snapshots, 12 GPU snapshots
 
 ## Resources
 
@@ -16,29 +16,32 @@ Samples: 15 queue snapshots, 15 GPU snapshots
 
 ## Headline
 
-- **85.2%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **37.7%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **84.9%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **36.7%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
-| Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |
-|---|---|---:|---:|---:|
-| witter-lab | user-d58f5a15 | 215.6 | 1724.7 | 7% |
-| zhuang-lab | user-0db9ced0 | 104.9 | 104.9 | 47% |
-| witter-lab | user-554c620c | 23.0 | 127.0 | 71% |
-| nerenberg-lab | user-6bb5f332 | 14.0 | 70.0 | 72% |
-| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 178.0 | — |
-| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 840.0 | — |
-| enkavi-lab | user-c21bdaa4 | 0.0 | 12.0 | — |
-| nerenberg-lab | user-b12dc074 | 0.0 | 81.5 | — |
+<table>
+<tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
+<tr style='background-color:#dcf3eb'><td>🟩 witter-lab</td><td>user-d58f5a15</td><td align='right'>167.6</td><td align='right'>1340.7</td><td align='right'>7%</td></tr>
+<tr style='background-color:#fbebf1'><td>🟪 zhuang-lab</td><td>user-0db9ced0</td><td align='right'>82.4</td><td align='right'>82.4</td><td align='right'>45%</td></tr>
+<tr style='background-color:#dcf3eb'><td>🟩 witter-lab</td><td>user-554c620c</td><td align='right'>18.5</td><td align='right'>91.0</td><td align='right'>71%</td></tr>
+<tr style='background-color:#fcf0d8'><td>🟨 nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>11.0</td><td align='right'>55.0</td><td align='right'>72%</td></tr>
+<tr style='background-color:#fce8e0'><td>🟧 ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>660.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>🟦 enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>12.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>🟨 nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>81.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>🟧 ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>173.5</td><td align='right'>—</td></tr>
+</table>
+
+(Row tint is each lab's chart color, lightened - GitHub strips inline CSS from some contexts, so the colored square is the reliable cue if the tint doesn't render for you.)
 
 ## Usage over time
 
-![CPUs allocated over time](assets/cpu_alloc.png)
+![CPU allocation over time](assets/cpu_alloc.png)
 
-![GPU allocation vs utilization over time](assets/gpu_alloc_util.png)
+![GPU allocation over time](assets/gpu_alloc_util.png)
 
-The GPU chart layers four things: solid color is GPU-hardware utilization by lab (Σ util% across that lab's allocated GPUs); solid gray is real utilization `nvidia-smi` reports that couldn't be traced to a job or lab; the hatched gray band on top of that is *actually* idle - allocated but not computing at all; and the dashed line is total cluster GPU capacity, so any gap above it is unallocated headroom.
+Both charts share the same layout: solid color is allocation by lab, and the dashed line is total cluster capacity, so any gap above it is unallocated headroom. The GPU chart additionally splits each lab's solid region into *utilized* (solid) vs *allocated but idle* (same color, translucent + hatched) - idle capacity stays attributed to the lab holding it rather than one undifferentiated gray band. Solid gray on top is real `nvidia-smi` utilization that couldn't be traced to a job or lab. The CPU chart has no idle split - this cluster doesn't expose per-job CPU utilization (checked: `sstat` returns no CPU-time data for running jobs here), only what's allocated, so CPU shows allocation only. Say the word if you'd like real CPU-utilization telemetry added - it would need a new sampling step, most likely ssh + `/proc/stat` per node, similar to how GPU utilization is collected today.
 
 Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (misses containerized/namespaced processes - it just can't see those PIDs), backfilled from Slurm's own GPU-to-job binding record (`scontrol show job -dd`, which doesn't depend on process visibility at all - it's the scheduler's own allocation, not an inference from what a node will show over ssh). The scontrol fallback attributed **442** GPU readings this run that the process-listing path missed.
 
@@ -46,28 +49,19 @@ Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (mi
 
 ![Queue wait time](assets/queue_wait.png)
 
-## Fairshare vs. usage
+Only jobs Slurm is actively scoring for scheduling (has a `sprio` priority) count as "pending" here - a job blocked on an unmet dependency or an array-task throttle isn't competing for resources yet, so its wait time reflects pipeline design, not cluster congestion, and would otherwise inflate this chart with something unrelated to scheduler load.
 
-![Fairshare vs GPU/CPU usage](assets/priority_scatter.png)
+## CPU usage vs. GPU usage
 
-Each point is one user on one day (n=3): that day's allocated GPU/CPU-hours against their mean *fairshare* priority component that same day, for everyone who ran something that day. Not a lifetime total per user - that would only grow and would mix together usage from weeks ago with today's fairshare. This plots the fairshare component specifically, not total Slurm priority - total priority also carries an age term (`PriorityWeightAge`=1000 vs `PriorityWeightFairShare`=10000) that, over any short window, accounts for essentially all of the movement in total priority regardless of usage - plotting total priority against usage would mostly be plotting time-in-queue against usage.
+![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)
 
-**GPU usage does not currently affect priority, confirmed directly from the Slurm config**, not just inferred from the chart shape: `PriorityWeightTRES` is unset (a job's own GPU/CPU mix carries no weight), and partition `main` has no `TRESBillingWeights` configured, so fairshare usage accounting bills by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. If the two panels above look similarly shaped, that's this setting in action, not a coincidence.
+Each point is one user at one snapshot (n=91), not averaged over time - the point is to see how a user's position moves, not collapse it to a single number. Both axes are usage decayed with Slurm's own ~7-day fairshare half-life (`PriorityDecayHalfLife` on this cluster), not a lifetime total or a per-day average, so this is close to what Slurm itself is actually tracking at each moment.
 
-## Allocated but idle (top 10)
-
-Users holding a GPU allocation with `nvidia-smi` utilization ≤10% the longest, cumulatively:
-
-| User | Lab | Idle GPU-hours |
-|---|---|---:|
-| user-d58f5a15 | witter-lab | 123.8 |
-| user-0db9ced0 | zhuang-lab | 48.7 |
-| user-6bb5f332 | nerenberg-lab | 14.3 |
-| user-554c620c | witter-lab | 6.1 |
+**CPU usage (x-axis) is essentially what earns priority here; GPU usage (y-axis) is what Slurm could weight the same way but doesn't**, confirmed directly from the Slurm config: `PriorityWeightTRES` is unset, and partition `main` has no `TRESBillingWeights` configured, so fairshare usage accounting bills by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. The users worth a second look are in the **upper-left**: low decayed CPU usage (so a high, unpenalized fairshare priority) paired with high decayed GPU usage.
 
 ## Recommendations
 
 1. **Make GPU usage count toward priority.** It structurally can't today - see the confirmation above. Fix by setting `TRESBillingWeights` on the `main` partition to give GPUs a nonzero weight (e.g. `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>`) and/or giving `PriorityWeightTRES` a GPU component, then restarting `slurmctld`. The weight value is a policy call (how many CPUs one GPU should be "worth") - not something to pick from monitoring data alone.
 
-2. **Act on sustained low utilization, not just report it.** The idle leaderboard above already identifies who's holding GPUs allocated-but-idle the longest. Two escalating steps on top of it: email a reminder once a user crosses an idle-hours threshold, and if utilization stays low after the reminder, taper their priority (QOS demotion or a fairshare penalty) rather than leaving it honor-system. Not implemented here - needs a policy decision first (threshold, grace period, who gets cc'd, and mail delivery from this host) before it's safe to automate.
+2. **Act on sustained low utilization, not just report it.** The per lab/user table above already shows GPU utilization by user - the CPU vs. GPU usage chart above is a more direct way to spot it (upper-left quadrant). Two escalating steps on top of that: email a reminder once a user's utilization stays low for a sustained stretch, and if it doesn't improve after the reminder, taper their priority (QOS demotion or a fairshare penalty) rather than leaving it honor-system. Not implemented here - needs a policy decision first (threshold, grace period, who gets cc'd, and mail delivery from this host) before it's safe to automate.
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Reads data/gpu_samples.jsonl (nvidia-smi, via ssh to GPU nodes) and
-data/queue_samples.jsonl (squeue + sprio, login node only) and writes
-assets/*.png + README.md. Runs on a compute node via `sbatch --wait` from
-run.sh - never on the login node (no numpy/matplotlib there).
+data/queue_samples.jsonl (squeue + sprio + scontrol, login node only) and
+writes assets/*.png + README.md. Runs on a compute node via `sbatch --wait`
+from run.sh - never on the login node (no numpy/matplotlib there).
 
 No pandas - stdlib json/statistics/collections only, matching the rest of this
 repo's minimalism.
@@ -18,29 +18,39 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.patches as mpatches
 
 DIR = Path(__file__).resolve().parent
 ASSETS = DIR / "assets"
 ASSETS.mkdir(exist_ok=True)
 
-IDLE_THRESHOLD = 10.0  # util_gpu <= this counts as idle
+# Slurm's own usage decay (`scontrol show config` -> PriorityDecayHalfLife on
+# this cluster). Used to compute "usage with a half-life" the same way Slurm's
+# fairshare accounting does, rather than a lifetime-cumulative total.
+HALF_LIFE_HOURS = 168.0
 
 # Categorical palette (fixed order, validated for CVD/contrast on the stacked-
-# area "adjacent" pairlist - see the dataviz skill). Extra labs beyond 8 fold
-# into "Other" (muted gray) rather than generating a 9th hue.
-LAB_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+# area "adjacent" pairlist - see the dataviz skill). witter-lab is pinned to
+# teal/aqua specifically (by request); other labs take the remaining 7 colors
+# in fixed order by name. Extra labs beyond 8 total fold into "Other" (muted
+# gray) rather than generating a 9th hue.
+WITTER_LAB = "witter-lab"
+WITTER_COLOR = "#1baf7a"
+LAB_COLORS = ["#2a78d6", "#eb6834", "#eda100",
               "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 OTHER_COLOR = "#898781"
-# "Allocated but idle" band: a hatched, tone-on-tone gray (not a categorical
-# hue) so it can never be mistaken for a lab, including the "Other" bucket -
-# distinguished by texture as well as tone.
-IDLE_FILL = "#c3c2b7"
-IDLE_LINE = "#898781"
+# Nearest colored-square emoji per hex - a zero-dependency color cue for the
+# README table that renders identically everywhere (GitHub strips inline CSS
+# from README HTML, so this is the reliable channel; the light background
+# tint below is a bonus if it survives, not the thing being relied on).
+LAB_EMOJI = {
+    WITTER_COLOR: "\U0001F7E9", "#2a78d6": "\U0001F7E6", "#eb6834": "\U0001F7E7",
+    "#eda100": "\U0001F7E8", "#e87ba4": "\U0001F7EA", "#008300": "\U0001F7EB",
+    "#4a3aa7": "⬛", "#e34948": "\U0001F7E5", OTHER_COLOR: "⬜",
+}
 # "Computing, unattributed" band: real nvidia-smi utilization that couldn't be
 # joined to a job/lab (the ssh-based PID lookup misses some processes - see
-# README note). Same neutral family as the idle band, one step darker and
-# solid (no hatch), so "solid gray = busy but unlabeled" reads as more
-# present than "hatched, lighter gray = actually idle".
+# README note). Not lab-colored since we don't know which lab it belongs to.
 UNATTRIB_FILL = "#898781"
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
@@ -77,14 +87,34 @@ def parse_ts(ts):
     return datetime.fromisoformat(ts)
 
 
+def rgba(hexcolor, alpha):
+    h = hexcolor.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return (r, g, b, alpha)
+
+
+def lighten(hexcolor, amount=0.85):
+    """Blend hexcolor toward white by `amount` (0=no change, 1=white) - a
+    soft pastel tint for a table-row background behind black text."""
+    h = hexcolor.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (int(c + (255 - c) * amount) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def lab_palette(labs):
-    """Fixed-order hue assignment; labs beyond 8 fold into 'Other'."""
-    ranked = sorted(labs)
+    """Fixed-order hue assignment; witter-lab is always teal. Labs beyond
+    the remaining 7 slots fold into 'Other'."""
+    ranked = sorted(l for l in labs if l != WITTER_LAB)
     colors = {}
-    shown = ranked[:8]
-    for lab, color in zip(shown, LAB_COLORS):
+    shown = []
+    if WITTER_LAB in labs:
+        colors[WITTER_LAB] = WITTER_COLOR
+        shown.append(WITTER_LAB)
+    for lab, color in zip(ranked, LAB_COLORS):
         colors[lab] = color
-    for lab in ranked[8:]:
+        shown.append(lab)
+    for lab in ranked[len(LAB_COLORS):]:
         colors[lab] = OTHER_COLOR
     return colors, set(shown)
 
@@ -109,59 +139,60 @@ def interval_hours(sorted_distinct_ts):
     return intervals
 
 
-def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
-                  overlay_x=None, overlay_y=None, overlay_label=None,
-                  extra_layers=None):
-    """extra_layers, if given: list of (label, y_values, facecolor, edgecolor,
-    hatch) - more series stacked on top of the per-lab ones in order, styled
-    off the categorical palette (e.g. a textured gray "idle" band) so each
-    reads as a different kind of thing, not another lab."""
-    extra_layers = extra_layers or []
+def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
+                 unattrib_y=None, unattrib_label="usage, unattributed",
+                 overlay_y=None, overlay_label="cluster capacity"):
+    """series_by_lab: {lab: (utilized_list, idle_list)}. idle_list may be
+    None for a lab/chart with no utilization concept (CPU: allocation only,
+    drawn solid, no hatch). For each lab (sorted by total descending): a
+    solid segment in that lab's own color (utilized, or total allocation if
+    idle_list is None), then, if given, a translucent hatched segment in the
+    SAME color stacked directly on top (allocated but idle) - idle capacity
+    stays visually anchored to the lab holding it, not lumped into one
+    undifferentiated gray band. unattrib_y, if given, is one more neutral
+    gray band on top (real usage that couldn't be traced to any lab).
+    overlay_y, if given, is a dashed reference line (e.g. cluster capacity)."""
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    labs = sorted(y_by_lab, key=lambda l: -sum(y_by_lab[l]))
-    single_point = len(x_by_lab) < 2
-    if labs or extra_layers:
+    labs = sorted(series_by_lab, key=lambda l: -sum(series_by_lab[l][0]))
+    single_point = len(x) < 2
+    has_idle = any(idle is not None for _, idle in series_by_lab.values())
+
+    entries = []  # (label_or_None, values, facecolor, edgecolor, hatch)
+    for l in labs:
+        util_vals, idle_vals = series_by_lab[l]
+        entries.append((bucket_label(l, shown), util_vals, colors[l], "none", None))
+        if idle_vals is not None:
+            entries.append((None, idle_vals, rgba(colors[l], 0.35), colors[l], "///"))
+    if unattrib_y is not None:
+        entries.append((unattrib_label, unattrib_y, UNATTRIB_FILL, UNATTRIB_FILL, None))
+
+    if entries:
         if single_point:
-            # stackplot needs >=2 x points to draw a visible fill (zero width
-            # otherwise) - render the one sample as a stacked bar instead.
             bottom = 0
-            for l in labs:
-                v = y_by_lab[l][0]
-                ax.bar(x_by_lab[0], v, bottom=bottom, width=0.01,
-                       color=colors[l], label=bucket_label(l, shown))
+            for label, vals, fc, ec, hatch in entries:
+                v = vals[0]
+                ax.bar(x[0], v, bottom=bottom, width=0.01, color=fc,
+                       edgecolor=(fc if ec == "none" else ec), hatch=hatch, label=label)
                 bottom += v
-            for label, y_vals, fc, ec, hatch in extra_layers:
-                ax.bar(x_by_lab[0], y_vals[0], bottom=bottom, width=0.01,
-                       color=fc, edgecolor=ec, hatch=hatch, label=label)
-                bottom += y_vals[0]
         else:
-            all_y = [y_by_lab[l] for l in labs]
-            all_labels = [bucket_label(l, shown) for l in labs]
-            all_colors = [colors[l] for l in labs]
-            for label, y_vals, fc, ec, hatch in extra_layers:
-                all_y.append(y_vals)
-                all_labels.append(label)
-                all_colors.append(fc)
-            # thin surface-colored edge between stacked segments reads as a
-            # gap rather than a hard seam
-            polys = ax.stackplot(x_by_lab, *all_y, labels=all_labels,
-                                  colors=all_colors, edgecolor=SURFACE,
-                                  linewidth=1)
-            for i, (label, y_vals, fc, ec, hatch) in enumerate(extra_layers):
-                poly = polys[len(labs) + i]
-                poly.set_edgecolor(ec)
-                poly.set_hatch(hatch)
-                poly.set_linewidth(0.6)
-    if overlay_x is not None and overlay_y:
-        if len(overlay_x) < 2:
-            ax.scatter(overlay_x, overlay_y, color=INK_MUTED, marker="_", s=300,
-                        linewidth=1.5, label=overlay_label)
+            all_y = [e[1] for e in entries]
+            all_colors = [e[2] for e in entries]
+            polys = ax.stackplot(x, *all_y, colors=all_colors, edgecolor=SURFACE, linewidth=1)
+            for poly, (label, vals, fc, ec, hatch) in zip(polys, entries):
+                if hatch:
+                    poly.set_hatch(hatch)
+                    poly.set_edgecolor(ec)
+                    poly.set_linewidth(0.6)
+                if label:
+                    poly.set_label(label)
+    if overlay_y is not None:
+        if len(x) < 2:
+            ax.scatter(x, overlay_y, color=INK_MUTED, marker="_", s=300,
+                       linewidth=1.5, label=overlay_label)
         else:
-            ax.plot(overlay_x, overlay_y, color=INK_MUTED, linewidth=1.5,
+            ax.plot(x, overlay_y, color=INK_MUTED, linewidth=1.5,
                      linestyle="--", label=overlay_label)
-    # explicit x-limits - matplotlib's date autoscale degenerates to a huge
-    # bogus range (e.g. year 1 CE) when there are fewer than 2 x points.
-    all_x = list(x_by_lab) + (list(overlay_x) if overlay_x else [])
+    all_x = list(x)
     if all_x:
         lo, hi = min(all_x), max(all_x)
         pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
@@ -171,9 +202,13 @@ def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
     tz = all_x[0].tzinfo if all_x else None
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=tz))
     fig.autofmt_xdate()
-    if labs or overlay_x is not None:
-        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False,
-                   fontsize=8)
+    handles, labels_ = ax.get_legend_handles_labels()
+    if has_idle:
+        handles.append(mpatches.Patch(facecolor=rgba(INK_MUTED, 0.35), edgecolor=INK_MUTED,
+                                       hatch="///", label="allocated, idle (per lab)"))
+    if handles:
+        ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1),
+                   frameon=False, fontsize=8)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -260,13 +295,11 @@ def main():
 
     gpu_hours = defaultdict(float)
     cpu_hours = defaultdict(float)
-    user_lab = {}
     for r in running:
         key = (r["user"] or "unknown", r["lab"] or "unknown")
         h = intervals.get(parse_ts(r["ts"]), 0.5)
         gpu_hours[key] += r["gpus"] * h
         cpu_hours[key] += r["cpus"] * h
-        user_lab[key] = key
 
     util_by_user = defaultdict(list)
     for r in gpu_dedup:
@@ -285,71 +318,66 @@ def main():
         })
     table_rows.sort(key=lambda r: (-r["gpu_hours"]))
 
-    # ================= chart 1 & 2: CPU / GPU allocated over time, stacked by lab =================
-    def alloc_series(field, totals_key, fallback_total):
-        by_ts_lab = defaultdict(lambda: defaultdict(int))
-        for r in running:
-            by_ts_lab[r["ts"]][r["lab"] or "unknown"] += r[field]
-        ts_sorted = sorted(by_ts_lab, key=parse_ts)
-        x = [parse_ts(t) for t in ts_sorted]
-        y_by_lab = defaultdict(list)
-        labs_here = {lab for v in by_ts_lab.values() for lab in v}
-        for t in ts_sorted:
-            for lab in labs_here:
-                y_by_lab[lab].append(by_ts_lab[t].get(lab, 0))
-        total_y = [by_ts_totals.get(t, {}).get(totals_key) or fallback_total
-                   for t in ts_sorted]
-        return x, y_by_lab, total_y
+    # ================= chart 1 & 2: CPU / GPU allocation over time, by lab,
+    #                    standardized: same title pattern, same "GPUs"/"CPUs"
+    #                    axis convention, same cluster-capacity dashed
+    #                    overlay, same usage_chart() code path for both. =================
+    # CPU has no idle/utilized split - Slurm doesn't give per-job CPU
+    # utilization on this cluster (checked: `sstat` returns no CPU fields for
+    # running jobs here), only what's allocated. GPU does, from nvidia-smi.
+    alloc_by_ts_lab_gpu = defaultdict(lambda: defaultdict(int))
+    alloc_by_ts_lab_cpu = defaultdict(lambda: defaultdict(int))
+    for r in running:
+        lab = r["lab"] or "unknown"
+        alloc_by_ts_lab_gpu[r["ts"]][lab] += r["gpus"]
+        alloc_by_ts_lab_cpu[r["ts"]][lab] += r["cpus"]
 
-    x_cpu, y_cpu, total_cpu = alloc_series("cpus", "cpus_total", cpus_total)
-    stacked_area(ASSETS / "cpu_alloc.png", "CPUs allocated over time (by lab)",
-                 "CPUs allocated", x_cpu, y_cpu, colors, shown,
-                 x_cpu, total_cpu, "cluster capacity")
+    ts_sorted_cpu = sorted({r["ts"] for r in running}, key=parse_ts)
+    x_cpu = [parse_ts(t) for t in ts_sorted_cpu]
+    labs_cpu = {lab for v in alloc_by_ts_lab_cpu.values() for lab in v}
+    series_cpu = {lab: ([alloc_by_ts_lab_cpu[t].get(lab, 0) for t in ts_sorted_cpu], None)
+                  for lab in labs_cpu}
+    cap_cpu = [by_ts_totals.get(t, {}).get("cpus_total") or cpus_total for t in ts_sorted_cpu]
+    usage_chart(ASSETS / "cpu_alloc.png", "CPU allocation over time (by lab)",
+                "CPUs", x_cpu, series_cpu, colors, shown, overlay_y=cap_cpu)
 
-    # ================= chart 2: GPU allocation vs. utilization, stacked by lab,
-    #                    with a textured gray band for allocated-but-idle =================
-    # One chart, not two: the colored stack is who's actually computing (by
-    # lab, from nvidia-smi util - Σ util% x allocated GPUs). Above it, two
-    # gray bands, not one:
-    #  - "computing, unattributed": nvidia-smi shows real utilization (often
-    #    high - 80-95%, tens of GB VRAM) but the ssh-based PID->job->lab
-    #    lookup in run.sh came up empty, most likely because query-compute-apps
-    #    can't see processes outside its own PID namespace (e.g. containers).
-    #    Counting this as "idle" would be wrong - it's real compute, just
-    #    unlabeled.
-    #  - "allocated, idle": what's left after subtracting *all* measured
-    #    utilization (attributed or not) from what squeue says is allocated.
-    #    This is the actually-idle number.
-    # The dashed line is total cluster capacity - headroom above it is
-    # unallocated.
     by_ts_lab_util = defaultdict(lambda: defaultdict(float))
     by_ts_total_util = defaultdict(float)
     for r in gpu_dedup:
         by_ts_total_util[r["ts"]] += r["util_gpu"] / 100.0
         if r.get("job") and r.get("lab"):
             by_ts_lab_util[r["ts"]][r["lab"]] += r["util_gpu"] / 100.0
-    ts_sorted2 = sorted({r["ts"] for r in gpu_dedup}, key=parse_ts)
-    x2 = [parse_ts(t) for t in ts_sorted2]
-    labs2 = {lab for v in by_ts_lab_util.values() for lab in v}
-    y2 = defaultdict(list)
-    for t in ts_sorted2:
-        for lab in labs2:
-            y2[lab].append(by_ts_lab_util[t].get(lab, 0.0))
-    attributed_total = {t: sum(by_ts_lab_util[t].values()) for t in ts_sorted2}
-    unattrib_y = [max(0.0, by_ts_total_util[t] - attributed_total[t]) for t in ts_sorted2]
-    idle_y = [max(0.0, gpus_alloc_by_ts.get(t, 0) - by_ts_total_util[t]) for t in ts_sorted2]
-    cap_y = [by_ts_totals.get(t, {}).get("gpus_total") or gpus_total for t in ts_sorted2]
 
-    stacked_area(ASSETS / "gpu_alloc_util.png",
-                 "GPU allocation vs. utilization over time (by lab)",
-                 "GPUs", x2, y2, colors, shown, x2, cap_y, "cluster capacity",
-                 extra_layers=[
-                     ("computing, unattributed", unattrib_y, UNATTRIB_FILL, UNATTRIB_FILL, None),
-                     ("allocated, idle", idle_y, IDLE_FILL, IDLE_LINE, "///"),
-                 ])
+    ts_sorted_gpu = sorted({r["ts"] for r in gpu_dedup}, key=parse_ts)
+    x_gpu = [parse_ts(t) for t in ts_sorted_gpu]
+    labs_gpu = {lab for v in by_ts_lab_util.values() for lab in v} | \
+               {lab for v in alloc_by_ts_lab_gpu.values() for lab in v}
+    series_gpu = {}
+    for lab in labs_gpu:
+        util_list = [by_ts_lab_util[t].get(lab, 0.0) for t in ts_sorted_gpu]
+        alloc_list = [alloc_by_ts_lab_gpu.get(t, {}).get(lab, 0) for t in ts_sorted_gpu]
+        idle_list = [max(0.0, a - u) for a, u in zip(alloc_list, util_list)]
+        series_gpu[lab] = (util_list, idle_list)
+    attributed_total = {t: sum(by_ts_lab_util[t].values()) for t in ts_sorted_gpu}
+    unattrib_y = [max(0.0, by_ts_total_util[t] - attributed_total[t]) for t in ts_sorted_gpu]
+    cap_gpu = [by_ts_totals.get(t, {}).get("gpus_total") or gpus_total for t in ts_sorted_gpu]
+
+    usage_chart(ASSETS / "gpu_alloc_util.png", "GPU allocation over time (by lab)",
+                "GPUs", x_gpu, series_gpu, colors, shown,
+                unattrib_y=unattrib_y, unattrib_label="computing, unattributed",
+                overlay_y=cap_gpu)
 
     # ================= bonus: queue wait time trend =================
-    pending = [r for r in queue_rows if r["state"] == "PENDING" and r["wait_seconds"] is not None]
+    # Only jobs sprio actually scores - i.e. eligible to run right now, not
+    # blocked on an unmet dependency or array-task throttle. sprio doesn't
+    # assign a priority at all to a dependency-blocked job (confirmed against
+    # live data: reasons "Dependency"/"DependencyNeverSatisfied"/
+    # "JobArrayTaskLimit" never carry a priority value; "Resources"/QOS-limit
+    # reasons do) - so "has a priority" is Slurm's own signal of "in the
+    # scheduling queue for real," and is a more robust filter than hand-
+    # maintaining a reason-string allowlist.
+    pending = [r for r in queue_rows if r["state"] == "PENDING"
+               and r["wait_seconds"] is not None and r.get("priority") is not None]
     by_ts_wait = defaultdict(list)
     for r in pending:
         by_ts_wait[r["ts"]].append(r["wait_seconds"] / 3600.0)
@@ -366,7 +394,7 @@ def main():
         lo, hi = min(x4), max(x4)
         pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
         ax.set_xlim(lo - pad, hi + pad)
-        ax.set_title("Queue wait time (currently-pending jobs)", loc="left")
+        ax.set_title("Queue wait time (eligible pending jobs)", loc="left")
         ax.set_ylabel("hours waited so far")
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=x4[0].tzinfo))
         fig.autofmt_xdate()
@@ -378,69 +406,70 @@ def main():
     else:
         have_queue_wait = False
 
-    # ================= bonus: priority vs GPU/CPU usage scatter =================
-    # One point per (user, day) who actually ran something that day - not a lifetime
-    # cumulative total, which would keep growing forever and drift out of sync with
-    # Slurm's own fairshare usage (which decays with a 7-day half-life, not a hard
-    # reset - see PriorityDecayHalfLife in `scontrol show config`).
-    def day_of(ts_str):
-        return parse_ts(ts_str).date()
-
-    gpu_hours_by_user_day = defaultdict(float)
-    cpu_hours_by_user_day = defaultdict(float)
+    # ================= bonus: CPU usage vs. GPU usage, decayed with a half-life =================
+    # "Usage" here mirrors how Slurm's own fairshare accounting works
+    # (PriorityDecayHalfLife=7-00:00:00, confirmed via `scontrol show
+    # config`): usage decays continuously with a 7-day half-life rather than
+    # resetting or accumulating forever, so recent usage counts far more than
+    # usage from a week ago. CPU usage computed this way is essentially what
+    # drives today's fairshare priority on this cluster - the thing that
+    # actually earns priority. GPU usage computed the identical way is what
+    # Slurm *could* weight the same way but doesn't (TRESBillingWeights is
+    # unset on partition `main` - see the note below). One point per (user,
+    # snapshot), not averaged over days - the point is to see a user's
+    # position drift over time, not collapse it to one number. Not colored by
+    # lab (this is about individual usage, not lab totals), and drawn
+    # translucent so density, not just position, is visible when many points
+    # overlap.
+    cpu_raw_by_user = defaultdict(dict)
+    gpu_raw_by_user = defaultdict(dict)
     for r in running:
-        key = (r["user"] or "unknown", day_of(r["ts"]))
-        h = intervals.get(parse_ts(r["ts"]), 0.5)
-        gpu_hours_by_user_day[key] += r["gpus"] * h
-        cpu_hours_by_user_day[key] += r["cpus"] * h
+        u = r["user"] or "unknown"
+        cpu_raw_by_user[u][r["ts"]] = cpu_raw_by_user[u].get(r["ts"], 0) + r["cpus"]
+        gpu_raw_by_user[u][r["ts"]] = gpu_raw_by_user[u].get(r["ts"], 0) + r["gpus"]
 
-    # Plot the *fairshare* component, not total priority. Total priority also
-    # carries the age term (PriorityWeightAge=1000, vs PriorityWeightFairShare
-    # =10000 for fairshare) - in practice, over any short window, virtually
-    # all movement in total priority comes from age (how long a job has been
-    # queued), not usage. Plotting total priority against usage mostly plots
-    # "time queued" against "usage", which swamps the actual usage effect this
-    # chart is meant to show. Fairshare is the one component usage can move.
-    fairshare_by_user_day = defaultdict(list)
+    user_snapshots = defaultdict(set)
     for r in queue_rows:
-        if r.get("fairshare") is not None and r.get("user"):
-            fairshare_by_user_day[(r["user"], day_of(r["ts"]))].append(r["fairshare"])
+        if r.get("user"):
+            user_snapshots[r["user"]].add(r["ts"])
 
-    usage_days = set(gpu_hours_by_user_day) | set(cpu_hours_by_user_day)
-    scatter_rows = []
-    for key in usage_days:
-        gh_val = gpu_hours_by_user_day.get(key, 0.0)
-        ch_val = cpu_hours_by_user_day.get(key, 0.0)
-        if gh_val <= 0 and ch_val <= 0:
-            continue
-        fairshares = fairshare_by_user_day.get(key)
-        if fairshares:
-            scatter_rows.append((gh_val, ch_val, stats.mean(fairshares)))
-    if scatter_rows:
-        gh = [s[0] for s in scatter_rows]
-        ch = [s[1] for s in scatter_rows]
-        fs = [s[2] for s in scatter_rows]
-        fig, axes = plt.subplots(1, 2, figsize=(9, 4))
-        axes[0].scatter(gh, fs, color=LAB_COLORS[0], s=40, edgecolor=SURFACE, linewidth=0.5)
-        axes[0].set_xlabel("GPU-hours allocated"); axes[0].set_ylabel("mean fairshare priority")
-        axes[0].set_title("Fairshare vs. GPU usage", loc="left", fontsize=11)
-        axes[1].scatter(ch, fs, color=LAB_COLORS[1], s=40, edgecolor=SURFACE, linewidth=0.5)
-        axes[1].set_xlabel("CPU-hours allocated"); axes[1].set_ylabel("mean fairshare priority")
-        axes[1].set_title("Fairshare vs. CPU usage", loc="left", fontsize=11)
+    ts_sorted_all = sorted({r["ts"] for r in queue_rows}, key=parse_ts)
+    decay_points = []  # (cpu_decayed, gpu_decayed)
+    for u, snaps in user_snapshots.items():
+        cpu_d = gpu_d = 0.0
+        prev_dt = None
+        cpu_raw = cpu_raw_by_user.get(u, {})
+        gpu_raw = gpu_raw_by_user.get(u, {})
+        for ts_str in ts_sorted_all:
+            dt = parse_ts(ts_str)
+            if prev_dt is not None:
+                factor = 0.5 ** ((dt - prev_dt).total_seconds() / 3600.0 / HALF_LIFE_HOURS)
+                cpu_d *= factor
+                gpu_d *= factor
+            h = intervals.get(dt, 0.5)
+            cpu_d += cpu_raw.get(ts_str, 0.0) * h
+            gpu_d += gpu_raw.get(ts_str, 0.0) * h
+            if ts_str in snaps:
+                decay_points.append((cpu_d, gpu_d))
+            prev_dt = dt
+
+    if decay_points:
+        cpu_vals = [p[0] for p in decay_points]
+        gpu_vals = [p[1] for p in decay_points]
+        fig, ax = plt.subplots(figsize=(7.5, 6))
+        ax.scatter(cpu_vals, gpu_vals, color=INK, alpha=0.12, s=26, linewidth=0)
+        ax.set_xlabel("decayed CPU usage (CPU-hours, ~7-day half-life)")
+        ax.set_ylabel("decayed GPU usage (GPU-hours, ~7-day half-life)")
+        ax.set_title("CPU usage vs. GPU usage (decayed)", loc="left", fontsize=12)
+        ax.text(0.02, 0.97, "low CPU usage (→ high priority),\nhigh GPU usage",
+                transform=ax.transAxes, ha="left", va="top", fontsize=8,
+                color=INK_SECONDARY, style="italic")
         fig.tight_layout()
-        fig.savefig(ASSETS / "priority_scatter.png", dpi=150)
+        fig.savefig(ASSETS / "cpu_gpu_usage.png", dpi=150)
         plt.close(fig)
-        have_scatter = True
+        have_usage_scatter = True
     else:
-        have_scatter = False
-
-    # ================= bonus: allocated-but-idle leaderboard =================
-    idle_hours = defaultdict(float)
-    for r in gpu_dedup:
-        if r.get("job") and r.get("user") and r["util_gpu"] <= IDLE_THRESHOLD:
-            h = intervals.get(parse_ts(r["ts"]), 0.5)
-            idle_hours[(r["user"], r.get("lab") or "unknown")] += h
-    idle_leaderboard = sorted(idle_hours.items(), key=lambda kv: -kv[1])[:10]
+        have_usage_scatter = False
 
     # ================= write README =================
     lines = []
@@ -473,26 +502,44 @@ def main():
     lines.append("")
     lines.append("## Per lab / per user")
     lines.append("")
-    lines.append("| Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |")
-    lines.append("|---|---|---:|---:|---:|")
+    lines.append("<table>")
+    lines.append("<tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th>"
+                 "<th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>")
     for row in table_rows:
         util = f"{row['util_pct']:.0f}%" if row["util_pct"] is not None else "—"
-        lines.append(f"| {row['lab']} | {row['user']} | {row['gpu_hours']:.1f} | "
-                     f"{row['cpu_hours']:.1f} | {util} |")
+        color = colors.get(row["lab"], OTHER_COLOR)
+        bg = lighten(color)
+        emoji = LAB_EMOJI.get(color, "")
+        lines.append(f"<tr style='background-color:{bg}'>"
+                     f"<td>{emoji} {row['lab']}</td><td>{row['user']}</td>"
+                     f"<td align='right'>{row['gpu_hours']:.1f}</td>"
+                     f"<td align='right'>{row['cpu_hours']:.1f}</td>"
+                     f"<td align='right'>{util}</td></tr>")
+    lines.append("</table>")
+    lines.append("")
+    lines.append("(Row tint is each lab's chart color, lightened - GitHub strips inline CSS "
+                 "from some contexts, so the colored square is the reliable cue if the tint "
+                 "doesn't render for you.)")
     lines.append("")
     lines.append("## Usage over time")
     lines.append("")
-    lines.append("![CPUs allocated over time](assets/cpu_alloc.png)")
+    lines.append("![CPU allocation over time](assets/cpu_alloc.png)")
     lines.append("")
-    lines.append("![GPU allocation vs utilization over time](assets/gpu_alloc_util.png)")
+    lines.append("![GPU allocation over time](assets/gpu_alloc_util.png)")
     lines.append("")
-    lines.append("The GPU chart layers four things: solid color is GPU-hardware "
-                 "utilization by lab (Σ util% across that lab's allocated GPUs); solid "
-                 "gray is real utilization `nvidia-smi` reports that couldn't be traced "
-                 "to a job or lab; the hatched gray band on top of that is *actually* "
-                 "idle - allocated but not computing at all; and the dashed line is "
-                 "total cluster GPU capacity, so any gap above it is unallocated "
-                 "headroom.")
+    lines.append("Both charts share the same layout: solid color is allocation by lab, "
+                 "and the dashed line is total cluster capacity, so any gap above it is "
+                 "unallocated headroom. The GPU chart additionally splits each lab's solid "
+                 "region into *utilized* (solid) vs *allocated but idle* (same color, "
+                 "translucent + hatched) - idle capacity stays attributed to the lab "
+                 "holding it rather than one undifferentiated gray band. Solid gray on top "
+                 "is real `nvidia-smi` utilization that couldn't be traced to a job or lab. "
+                 "The CPU chart has no idle split - this cluster doesn't expose per-job CPU "
+                 "utilization (checked: `sstat` returns no CPU-time data for running jobs "
+                 "here), only what's allocated, so CPU shows allocation only. Say the word "
+                 "if you'd like real CPU-utilization telemetry added - it would need a new "
+                 "sampling step, most likely ssh + `/proc/stat` per node, similar to how "
+                 "GPU utilization is collected today.")
     lines.append("")
     lines.append("Attribution is cross-referenced two ways: `nvidia-smi`'s own process "
                  "listing (misses containerized/namespaced processes - it just can't see "
@@ -510,42 +557,34 @@ def main():
         lines.append("")
         lines.append("![Queue wait time](assets/queue_wait.png)")
         lines.append("")
-    if have_scatter:
-        lines.append("## Fairshare vs. usage")
+        lines.append("Only jobs Slurm is actively scoring for scheduling (has a `sprio` "
+                     "priority) count as \"pending\" here - a job blocked on an unmet "
+                     "dependency or an array-task throttle isn't competing for resources "
+                     "yet, so its wait time reflects pipeline design, not cluster "
+                     "congestion, and would otherwise inflate this chart with something "
+                     "unrelated to scheduler load.")
         lines.append("")
-        lines.append("![Fairshare vs GPU/CPU usage](assets/priority_scatter.png)")
+    if have_usage_scatter:
+        lines.append("## CPU usage vs. GPU usage")
         lines.append("")
-        lines.append(f"Each point is one user on one day (n={len(scatter_rows)}): that "
-                     "day's allocated GPU/CPU-hours against their mean *fairshare* "
-                     "priority component that same day, for everyone who ran something "
-                     "that day. Not a lifetime total per user - that would only grow "
-                     "and would mix together usage from weeks ago with today's fairshare. "
-                     "This plots the fairshare component specifically, not total Slurm "
-                     "priority - total priority also carries an age term "
-                     "(`PriorityWeightAge`=1000 vs `PriorityWeightFairShare`=10000) that, "
-                     "over any short window, accounts for essentially all of the movement "
-                     "in total priority regardless of usage - plotting total priority "
-                     "against usage would mostly be plotting time-in-queue against usage.")
+        lines.append("![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)")
         lines.append("")
-        lines.append("**GPU usage does not currently affect priority, confirmed directly "
-                     "from the Slurm config**, not just inferred from the chart shape: "
-                     "`PriorityWeightTRES` is unset (a job's own GPU/CPU mix carries no "
-                     "weight), and partition `main` has no `TRESBillingWeights` configured, "
-                     "so fairshare usage accounting bills by CPU count alone - a job holding "
-                     "4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. "
-                     "If the two panels above look similarly shaped, that's this setting in "
-                     "action, not a coincidence.")
+        lines.append(f"Each point is one user at one snapshot (n={len(decay_points)}), not "
+                     "averaged over time - the point is to see how a user's position moves, "
+                     "not collapse it to a single number. Both axes are usage decayed with "
+                     "Slurm's own ~7-day fairshare half-life (`PriorityDecayHalfLife` on "
+                     "this cluster), not a lifetime total or a per-day average, so this is "
+                     "close to what Slurm itself is actually tracking at each moment.")
         lines.append("")
-    if idle_leaderboard:
-        lines.append("## Allocated but idle (top 10)")
-        lines.append("")
-        lines.append(f"Users holding a GPU allocation with `nvidia-smi` utilization "
-                     f"≤{IDLE_THRESHOLD:.0f}% the longest, cumulatively:")
-        lines.append("")
-        lines.append("| User | Lab | Idle GPU-hours |")
-        lines.append("|---|---|---:|")
-        for (user, lab), h in idle_leaderboard:
-            lines.append(f"| {user} | {lab} | {h:.1f} |")
+        lines.append("**CPU usage (x-axis) is essentially what earns priority here; GPU "
+                     "usage (y-axis) is what Slurm could weight the same way but doesn't**, "
+                     "confirmed directly from the Slurm config: `PriorityWeightTRES` is "
+                     "unset, and partition `main` has no `TRESBillingWeights` configured, "
+                     "so fairshare usage accounting bills by CPU count alone - a job "
+                     "holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, "
+                     "no-GPU job. The users worth a second look are in the **upper-left**: "
+                     "low decayed CPU usage (so a high, unpenalized fairshare priority) "
+                     "paired with high decayed GPU usage.")
         lines.append("")
 
     lines.append("## Recommendations")
@@ -558,14 +597,15 @@ def main():
                  "`slurmctld`. The weight value is a policy call (how many CPUs one GPU "
                  "should be \"worth\") - not something to pick from monitoring data alone.")
     lines.append("")
-    lines.append("2. **Act on sustained low utilization, not just report it.** The idle "
-                 "leaderboard above already identifies who's holding GPUs allocated-but-idle "
-                 "the longest. Two escalating steps on top of it: email a reminder once a "
-                 "user crosses an idle-hours threshold, and if utilization stays low after "
-                 "the reminder, taper their priority (QOS demotion or a fairshare penalty) "
-                 "rather than leaving it honor-system. Not implemented here - needs a policy "
-                 "decision first (threshold, grace period, who gets cc'd, and mail delivery "
-                 "from this host) before it's safe to automate.")
+    lines.append("2. **Act on sustained low utilization, not just report it.** The per "
+                 "lab/user table above already shows GPU utilization by user - the CPU vs. "
+                 "GPU usage chart above is a more direct way to spot it (upper-left "
+                 "quadrant). Two escalating steps on top of that: email a reminder once a "
+                 "user's utilization stays low for a sustained stretch, and if it doesn't "
+                 "improve after the reminder, taper their priority (QOS demotion or a "
+                 "fairshare penalty) rather than leaving it honor-system. Not implemented "
+                 "here - needs a policy decision first (threshold, grace period, who gets "
+                 "cc'd, and mail delivery from this host) before it's safe to automate.")
     lines.append("")
 
     (DIR / "README.md").write_text("\n".join(lines) + "\n")
