@@ -36,6 +36,12 @@ OTHER_COLOR = "#898781"
 # distinguished by texture as well as tone.
 IDLE_FILL = "#c3c2b7"
 IDLE_LINE = "#898781"
+# "Computing, unattributed" band: real nvidia-smi utilization that couldn't be
+# joined to a job/lab (the ssh-based PID lookup misses some processes - see
+# README note). Same neutral family as the idle band, one step darker and
+# solid (no hatch), so "solid gray = busy but unlabeled" reads as more
+# present than "hatched, lighter gray = actually idle".
+UNATTRIB_FILL = "#898781"
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 INK_MUTED = "#898781"
@@ -105,15 +111,16 @@ def interval_hours(sorted_distinct_ts):
 
 def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
                   overlay_x=None, overlay_y=None, overlay_label=None,
-                  extra_layer=None):
-    """extra_layer, if given: (label, y_values, facecolor, edgecolor, hatch) -
-    one more series stacked on top of the per-lab ones, styled off the
-    categorical palette (e.g. a textured gray "idle" band) so it reads as a
-    different kind of thing, not another lab."""
+                  extra_layers=None):
+    """extra_layers, if given: list of (label, y_values, facecolor, edgecolor,
+    hatch) - more series stacked on top of the per-lab ones in order, styled
+    off the categorical palette (e.g. a textured gray "idle" band) so each
+    reads as a different kind of thing, not another lab."""
+    extra_layers = extra_layers or []
     fig, ax = plt.subplots(figsize=(9, 4.5))
     labs = sorted(y_by_lab, key=lambda l: -sum(y_by_lab[l]))
     single_point = len(x_by_lab) < 2
-    if labs or extra_layer:
+    if labs or extra_layers:
         if single_point:
             # stackplot needs >=2 x points to draw a visible fill (zero width
             # otherwise) - render the one sample as a stacked bar instead.
@@ -123,16 +130,15 @@ def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
                 ax.bar(x_by_lab[0], v, bottom=bottom, width=0.01,
                        color=colors[l], label=bucket_label(l, shown))
                 bottom += v
-            if extra_layer:
-                label, y_vals, fc, ec, hatch = extra_layer
+            for label, y_vals, fc, ec, hatch in extra_layers:
                 ax.bar(x_by_lab[0], y_vals[0], bottom=bottom, width=0.01,
                        color=fc, edgecolor=ec, hatch=hatch, label=label)
+                bottom += y_vals[0]
         else:
             all_y = [y_by_lab[l] for l in labs]
             all_labels = [bucket_label(l, shown) for l in labs]
             all_colors = [colors[l] for l in labs]
-            if extra_layer:
-                label, y_vals, fc, ec, hatch = extra_layer
+            for label, y_vals, fc, ec, hatch in extra_layers:
                 all_y.append(y_vals)
                 all_labels.append(label)
                 all_colors.append(fc)
@@ -141,10 +147,11 @@ def stacked_area(path, title, ylabel, x_by_lab, y_by_lab, colors, shown,
             polys = ax.stackplot(x_by_lab, *all_y, labels=all_labels,
                                   colors=all_colors, edgecolor=SURFACE,
                                   linewidth=1)
-            if extra_layer:
-                polys[-1].set_edgecolor(ec)
-                polys[-1].set_hatch(hatch)
-                polys[-1].set_linewidth(0.6)
+            for i, (label, y_vals, fc, ec, hatch) in enumerate(extra_layers):
+                poly = polys[len(labs) + i]
+                poly.set_edgecolor(ec)
+                poly.set_hatch(hatch)
+                poly.set_linewidth(0.6)
     if overlay_x is not None and overlay_y:
         if len(overlay_x) < 2:
             ax.scatter(overlay_x, overlay_y, color=INK_MUTED, marker="_", s=300,
@@ -279,29 +286,44 @@ def main():
     # ================= chart 2: GPU allocation vs. utilization, stacked by lab,
     #                    with a textured gray band for allocated-but-idle =================
     # One chart, not two: the colored stack is who's actually computing (by
-    # lab, from nvidia-smi util - Σ util% x allocated GPUs), the hatched gray
-    # band on top is the rest of what's allocated (from squeue) but doing
-    # nothing, and the dashed line is total cluster capacity - headroom above
-    # it is unallocated.
+    # lab, from nvidia-smi util - Σ util% x allocated GPUs). Above it, two
+    # gray bands, not one:
+    #  - "computing, unattributed": nvidia-smi shows real utilization (often
+    #    high - 80-95%, tens of GB VRAM) but the ssh-based PID->job->lab
+    #    lookup in run.sh came up empty, most likely because query-compute-apps
+    #    can't see processes outside its own PID namespace (e.g. containers).
+    #    Counting this as "idle" would be wrong - it's real compute, just
+    #    unlabeled.
+    #  - "allocated, idle": what's left after subtracting *all* measured
+    #    utilization (attributed or not) from what squeue says is allocated.
+    #    This is the actually-idle number.
+    # The dashed line is total cluster capacity - headroom above it is
+    # unallocated.
     by_ts_lab_util = defaultdict(lambda: defaultdict(float))
+    by_ts_total_util = defaultdict(float)
     for r in gpu_dedup:
+        by_ts_total_util[r["ts"]] += r["util_gpu"] / 100.0
         if r.get("job") and r.get("lab"):
             by_ts_lab_util[r["ts"]][r["lab"]] += r["util_gpu"] / 100.0
-    ts_sorted2 = sorted(by_ts_lab_util, key=parse_ts)
+    ts_sorted2 = sorted({r["ts"] for r in gpu_dedup}, key=parse_ts)
     x2 = [parse_ts(t) for t in ts_sorted2]
     labs2 = {lab for v in by_ts_lab_util.values() for lab in v}
     y2 = defaultdict(list)
     for t in ts_sorted2:
         for lab in labs2:
             y2[lab].append(by_ts_lab_util[t].get(lab, 0.0))
-    computing_total = {t: sum(by_ts_lab_util[t].values()) for t in ts_sorted2}
-    idle_y = [max(0.0, gpus_alloc_by_ts.get(t, 0) - computing_total[t]) for t in ts_sorted2]
+    attributed_total = {t: sum(by_ts_lab_util[t].values()) for t in ts_sorted2}
+    unattrib_y = [max(0.0, by_ts_total_util[t] - attributed_total[t]) for t in ts_sorted2]
+    idle_y = [max(0.0, gpus_alloc_by_ts.get(t, 0) - by_ts_total_util[t]) for t in ts_sorted2]
     cap_y = [by_ts_totals.get(t, {}).get("gpus_total") or gpus_total for t in ts_sorted2]
 
     stacked_area(ASSETS / "gpu_alloc_util.png",
                  "GPU allocation vs. utilization over time (by lab)",
                  "GPUs", x2, y2, colors, shown, x2, cap_y, "cluster capacity",
-                 extra_layer=("allocated, idle", idle_y, IDLE_FILL, IDLE_LINE, "///"))
+                 extra_layers=[
+                     ("computing, unattributed", unattrib_y, UNATTRIB_FILL, UNATTRIB_FILL, None),
+                     ("allocated, idle", idle_y, IDLE_FILL, IDLE_LINE, "///"),
+                 ])
 
     # ================= bonus: queue wait time trend =================
     pending = [r for r in queue_rows if r["state"] == "PENDING" and r["wait_seconds"] is not None]
@@ -434,11 +456,14 @@ def main():
     lines.append("")
     lines.append("![GPU allocation vs utilization over time](assets/gpu_alloc_util.png)")
     lines.append("")
-    lines.append("The GPU chart layers three things at once: solid color is GPU-hardware "
-                 "utilization by lab (Σ util% across that lab's allocated GPUs), the "
-                 "hatched gray band on top is allocated-but-idle - GPUs a job is holding "
-                 "but not using - and the dashed line is total cluster GPU capacity, so "
-                 "any gap above the dashed line is unallocated headroom.")
+    lines.append("The GPU chart layers four things: solid color is GPU-hardware "
+                 "utilization by lab (Σ util% across that lab's allocated GPUs); solid "
+                 "gray is real utilization `nvidia-smi` reports that couldn't be traced "
+                 "to a job or lab (the ssh-based PID lookup misses some processes - "
+                 "likely containerized ones outside its PID namespace); the hatched gray "
+                 "band on top of that is *actually* idle - allocated but not computing "
+                 "at all; and the dashed line is total cluster GPU capacity, so any gap "
+                 "above it is unallocated headroom.")
     lines.append("")
     if have_queue_wait:
         lines.append("## Queue")
