@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-05T06:00:17-07:00
-Samples: 21 queue snapshots, 21 GPU snapshots
+Last updated: 2026-08-05T06:30:16-07:00
+Samples: 22 queue snapshots, 22 GPU snapshots
 
 ## Resources
 
@@ -16,19 +16,19 @@ Samples: 21 queue snapshots, 21 GPU snapshots
 
 ## Headline
 
-- **83.7%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **59.4%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **83.8%** of the cluster's 60 GPUs allocated, averaged across all samples
+- **57.5%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
 
 ## Per lab / per user
 
 | Lab | User | GPU-hours allocated | CPU-hours allocated | GPU utilization |
 |---|---|---:|---:|---:|
-| witter-lab | user-d58f5a15 | 272.3 | 2178.3 | 8% |
-| zhuang-lab | user-0db9ced0 | 125.7 | 126.2 | 54% |
-| witter-lab | user-554c620c | 47.2 | 365.8 | 92% |
-| nerenberg-lab | user-6bb5f332 | 17.0 | 85.0 | 77% |
-| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 27.9 | — |
-| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 1114.8 | — |
+| witter-lab | user-d58f5a15 | 288.3 | 2306.3 | 9% |
+| zhuang-lab | user-0db9ced0 | 132.2 | 132.7 | 51% |
+| witter-lab | user-554c620c | 49.2 | 381.8 | 91% |
+| nerenberg-lab | user-6bb5f332 | 18.0 | 90.0 | 77% |
+| ibarragarciapadilla-lab | user-eec7ffae | 0.0 | 29.4 | — |
+| ibarragarciapadilla-lab | user-3cfc41a3 | 0.0 | 1174.8 | — |
 
 ## Usage over time
 
@@ -56,8 +56,8 @@ Users holding a GPU allocation with `nvidia-smi` utilization ≤10% the longest,
 
 | User | Lab | Idle GPU-hours |
 |---|---|---:|
-| user-0db9ced0 | zhuang-lab | 19.6 |
-| user-d58f5a15 | witter-lab | 12.6 |
+| user-0db9ced0 | zhuang-lab | 23.1 |
+| user-d58f5a15 | witter-lab | 13.6 |
 | user-6bb5f332 | nerenberg-lab | 4.5 |
-| user-554c620c | witter-lab | 1.5 |
+| user-554c620c | witter-lab | 2.0 |
 
