@@ -17,7 +17,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 
 DIR = Path(__file__).resolve().parent
@@ -345,6 +344,16 @@ def main():
         })
     table_rows.sort(key=lambda r: (-r["gpu_hours"]))
 
+    # ---- worst-case escalation candidate: biggest allocation sitting on the
+    # lowest utilization, gated on a minimum GPU-hour floor so a user with a
+    # couple of idle hours doesn't outrank someone hoarding hundreds. ----
+    ESCALATION_MIN_GPU_HOURS = 50.0
+    escalation_candidates = [r for r in table_rows
+                              if r["util_pct"] is not None
+                              and r["gpu_hours"] >= ESCALATION_MIN_GPU_HOURS]
+    worst_offender = (min(escalation_candidates, key=lambda r: r["util_pct"])
+                       if escalation_candidates else None)
+
     # ================= chart 1 & 2: CPU / GPU allocation over time, by lab -
     #                    standardized: same title pattern, same "GPUs"/"CPUs"
     #                    axis convention, same cluster-capacity dashed
@@ -426,8 +435,6 @@ def main():
         ax.set_xlim(lo - pad, hi + pad)
         ax.set_title("Queue wait time (eligible pending jobs)", loc="left")
         ax.set_ylabel("hours waited so far")
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(byminute=[0, 30], tz=x4[0].tzinfo))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M", tz=x4[0].tzinfo))
         fig.autofmt_xdate()
         ax.legend(frameon=False, fontsize=8)
         fig.tight_layout()
@@ -575,14 +582,52 @@ def main():
 
     lines.append("## Recommendations")
     lines.append("")
-    lines.append("1. **Weight GPU usage in fairshare:** "
+    lines.append("1. **Weight GPU usage in fairshare.** `TRESBillingWeights` and "
+                 "`PriorityWeightTRES` are both unset right now, so Slurm's fairshare "
+                 "score only sees CPU-seconds - a job holding 4 idle L40S GPUs costs "
+                 "nothing in priority as long as it isn't also holding CPUs. That's the "
+                 "exact failure mode the scatter above is built to catch (upper-left: low "
+                 "CPU usage, high GPU usage). Fix: "
                  "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` "
-                 "(or set `PriorityWeightTRES`), then restart `slurmctld`. Weight value is a "
-                 "policy call.")
+                 "(or set `PriorityWeightTRES` cluster-wide), then `scontrol reconfigure` - "
+                 "a full `slurmctld` restart also works but drops in-flight priority state. "
+                 "A reasonable starting point for `<weight>` is the CPUs-per-GPU ratio on a "
+                 "GPU node (128 CPUs / 4 GPUs = 32), so one GPU costs as much fairshare as "
+                 f"the CPU share it displaces; tune from there against next week's headline "
+                 f"numbers ({pct_gpu_alloc:.1f}% allocated, {pct_util_when_alloc:.1f}% "
+                 "utilized when allocated, as of this snapshot). The weight value itself is "
+                 "a policy call - loop in whoever owns cluster allocation policy before "
+                 "changing it.")
     lines.append("")
-    lines.append("2. **Escalate on sustained low utilization** (see table and scatter "
-                 "above): reminder, then a fairshare/QOS penalty. Needs a threshold and "
-                 "grace period decided first.")
+    esc_line = ("2. **Escalate on sustained low utilization** (see table and scatter above). ")
+    if worst_offender:
+        esc_line += (
+            f"Right now the clearest candidate is `{worst_offender['user']}` in "
+            f"`{worst_offender['lab']}`: {worst_offender['gpu_hours']:.1f} GPU-hours "
+            f"allocated at {worst_offender['util_pct']:.0f}% average utilization, i.e. "
+            f"roughly {worst_offender['gpu_hours'] * (1 - worst_offender['util_pct'] / 100):.0f} "
+            "GPU-hours that sat idle instead of going to someone in the queue. ")
+    esc_line += (
+        "Turning that into an automated escalation needs two decisions made up front: a "
+        "utilization threshold (something like under 20% mean utilization over at least "
+        f"{ESCALATION_MIN_GPU_HOURS:.0f} allocated GPU-hours is a defensible starting bar - "
+        "loose enough to skip short debugging runs, tight enough to catch parked "
+        "allocations) and a grace period (how many consecutive low-utilization snapshots "
+        "before it counts as \"sustained\" rather than a momentary lull between batches). "
+        "Once those are set, the mechanism can be either soft (a bot that reads "
+        "`data/gpu_samples.jsonl` and reminds the user/lab by email or Slack) or hard (a "
+        "Slurm-side QOS penalty, e.g. `sacctmgr modify qos <qos> set Priority-=<n>`, applied "
+        "after N consecutive offending snapshots). Neither exists yet - today the table and "
+        "scatter above are a read-only signal, not an enforced policy.")
+    lines.append(esc_line)
+    lines.append("")
+    lines.append("3. **Don't lock in a weight or threshold off one snapshot.** This report "
+                 f"has {len(distinct_ts)} queue snapshots so far, and the CPU-vs-GPU scatter "
+                 "decays usage on a 7-day fairshare half-life - it needs roughly that long "
+                 "of continuous data before it reflects steady-state behavior rather than "
+                 "whoever happened to be running jobs this week. Treat recommendation 1's "
+                 "weight and recommendation 2's threshold as drafts; revisit both after a "
+                 "week or two of accumulated snapshots.")
     lines.append("")
 
     (DIR / "README.md").write_text("\n".join(lines) + "\n")
