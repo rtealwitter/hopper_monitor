@@ -2,7 +2,7 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-06T13:00:16-07:00
+Last updated: 2026-08-06T13:19:40-07:00
 Samples: 46 queue snapshots, 46 GPU snapshots
 
 ## Resources
@@ -28,13 +28,11 @@ Samples: 46 queue snapshots, 46 GPU snapshots
 <tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>346.0</td><td align='right'>346.0</td><td align='right'>47%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>94.0</td><td align='right'>207.0</td><td align='right'>69%</td></tr>
 <tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>40.0</td><td align='right'>200.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>14.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>2512.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>14.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>234.5</td><td align='right'>—</td></tr>
 </table>
-
-(Row background is each lab's chart color, lightened, matching the charts above. GitHub strips inline CSS, so this table renders plain on github.com; the tint shows in renderers that keep inline styles, e.g. a local Markdown preview.)
 
 ## Usage over time
 
@@ -42,27 +40,27 @@ Samples: 46 queue snapshots, 46 GPU snapshots
 
 ![GPU allocation over time](assets/gpu_alloc_util.png)
 
-Both charts share the same structure: solid color is *utilized* by lab, translucent + hatched (same color) on top of it is that lab's *allocated but idle*, solid gray above that is usage that couldn't be traced to a job or lab, and the dashed line is total cluster capacity - any gap above it is unallocated headroom. CPU utilization comes from cgroup v2 accounting (`cpu.stat`'s `usage_usec`, cumulative CPU time per job) read directly off each node, since `sstat` returns nothing usable for this on this cluster.
+Solid = utilized by lab, hatched = allocated but idle, gray = usage not traceable to a lab, dashed line = cluster capacity.
 
-Attribution is cross-referenced two ways: `nvidia-smi`'s own process listing (misses containerized/namespaced processes), backfilled from Slurm's GPU-to-job binding record (`scontrol show job -dd`). The scontrol fallback attributed **1446** GPU readings this run that the process-listing path missed.
+Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **1446** readings the former missed.
 
 ## Queue
 
 ![Queue wait time](assets/queue_wait.png)
 
-Only jobs Slurm is actively scoring for scheduling (has a `sprio` priority) count as "pending" here - a job blocked on an unmet dependency or an array-task throttle isn't competing for resources yet, so its wait time reflects pipeline design, not cluster congestion.
+"Pending" here means Slurm is actively scoring the job (has a `sprio` priority) - excludes jobs blocked on a dependency or array-task throttle.
 
 ## CPU usage vs. GPU usage
 
 ![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)
 
-Each point is one user at one snapshot (n=261), not averaged over time, to show how a user's position moves rather than collapsing it to a single number. Both axes are usage decayed with Slurm's own ~7-day fairshare half-life (`PriorityDecayHalfLife` on this cluster), not a lifetime total or a per-day average.
+One point per user per snapshot (n=261), usage decayed on Slurm's ~7-day fairshare half-life.
 
-**CPU usage (x-axis) is essentially what earns priority here; GPU usage (y-axis) is what Slurm could weight the same way but doesn't**: `PriorityWeightTRES` is unset, and partition `main` has no `TRESBillingWeights` configured, so fairshare usage accounting bills by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same usage debt as an 8-CPU, no-GPU job. The users worth a second look are in the **upper-left**: low decayed CPU usage (high, unpenalized fairshare priority) paired with high decayed GPU usage.
+**GPU usage doesn't count toward priority on this cluster** (`TRESBillingWeights`/`PriorityWeightTRES` unset) - watch the **upper-left**: low CPU usage (high priority) with high GPU usage.
 
 ## Recommendations
 
-1. **Make GPU usage count toward priority.** Set `TRESBillingWeights` on the `main` partition to give GPUs a nonzero weight (e.g. `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>`) and/or give `PriorityWeightTRES` a GPU component, then restart `slurmctld`. The weight value is a policy call (how many CPUs one GPU should be "worth"), not something to derive from monitoring data alone.
+1. **Weight GPU usage in fairshare:** `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` (or set `PriorityWeightTRES`), then restart `slurmctld`. Weight value is a policy call.
 
-2. **Act on sustained low utilization, not just report it.** The per lab/user table above shows GPU utilization by user; the CPU vs. GPU usage chart above is a more direct way to spot it (upper-left quadrant). Two escalating steps: email a reminder once a user's utilization stays low for a sustained stretch, and taper their priority (QOS demotion or a fairshare penalty) if it doesn't improve. Not implemented here - needs a policy decision first (threshold, grace period, who gets cc'd, and mail delivery from this host).
+2. **Escalate on sustained low utilization** (see table and scatter above): reminder, then a fairshare/QOS penalty. Needs a threshold and grace period decided first.
 

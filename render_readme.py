@@ -24,28 +24,18 @@ DIR = Path(__file__).resolve().parent
 ASSETS = DIR / "assets"
 ASSETS.mkdir(exist_ok=True)
 
-# Slurm's own usage decay (`scontrol show config` -> PriorityDecayHalfLife on
-# this cluster). Used to compute "usage with a half-life" the same way Slurm's
-# fairshare accounting does, rather than a lifetime-cumulative total.
+# Matches Slurm's own PriorityDecayHalfLife, so "decayed usage" here tracks
+# fairshare accounting rather than a lifetime-cumulative total.
 HALF_LIFE_HOURS = 168.0
 
-# Categorical palette (fixed order, validated for CVD/contrast on the stacked-
-# area "adjacent" pairlist - see the dataviz skill; re-validated with this
-# exact teal via scripts/validate_palette.js after swapping it in - all
-# checks pass in this order). witter-lab is pinned to a true teal (#008080
-# reads as too gray - chroma 0.093, below the validator's floor - #009999 is
-# the nearest fully-saturated teal that still clears it) specifically by
-# request; other labs take the remaining 7 colors in fixed order by name.
-# Extra labs beyond 8 total fold into "Other" (muted gray) rather than
-# generating a 9th hue.
+# Fixed-order categorical palette; witter-lab pinned to teal, other labs take
+# the rest in order, extras fold into "Other" (muted gray).
 WITTER_LAB = "witter-lab"
 WITTER_COLOR = "#009999"
 LAB_COLORS = ["#2a78d6", "#eb6834", "#eda100",
               "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 OTHER_COLOR = "#898781"
-# "Computing, unattributed" band: real nvidia-smi utilization that couldn't be
-# joined to a job/lab (the ssh-based PID lookup misses some processes - see
-# README note). Not lab-colored since we don't know which lab it belongs to.
+# GPU utilization real but not attributable to any job/lab.
 UNATTRIB_FILL = "#898781"
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
@@ -135,11 +125,7 @@ def interval_hours(sorted_distinct_ts):
 
 
 def percentile(sorted_vals, p):
-    """Linear-interpolation percentile (the "linear" method numpy/Excel use
-    by default). Monotonic in p by construction - p90 can never fall below
-    p50 for the same data, unlike `sorted_vals[int(p/100 * (n-1))]`, which at
-    small n rounds toward the wrong end: for n=2 it's `int(0.9*1)=0`, i.e.
-    "p90" silently becomes the *smaller* of the two values."""
+    """Linear-interpolation percentile (numpy/Excel default)."""
     n = len(sorted_vals)
     if n == 1:
         return sorted_vals[0]
@@ -152,16 +138,10 @@ def percentile(sorted_vals, p):
 def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
                  unattrib_y=None, unattrib_label="usage, unattributed",
                  overlay_y=None, overlay_label="cluster capacity"):
-    """series_by_lab: {lab: (utilized_list, idle_list)}. idle_list may be
-    None for a lab/chart with no utilization concept (CPU: allocation only,
-    drawn solid, no hatch). For each lab (sorted by total descending): a
-    solid segment in that lab's own color (utilized, or total allocation if
-    idle_list is None), then, if given, a translucent hatched segment in the
-    SAME color stacked directly on top (allocated but idle) - idle capacity
-    stays visually anchored to the lab holding it, not lumped into one
-    undifferentiated gray band. unattrib_y, if given, is one more neutral
-    gray band on top (real usage that couldn't be traced to any lab).
-    overlay_y, if given, is a dashed reference line (e.g. cluster capacity)."""
+    """series_by_lab: {lab: (utilized_list, idle_list)}, idle_list None if
+    the chart has no utilization concept (CPU: allocation only). Stacks each
+    lab's utilized (solid) + idle (hatched, same color), then unattrib_y
+    (gray) and overlay_y (dashed reference line) on top."""
     fig, ax = plt.subplots(figsize=(9, 4.5))
     labs = sorted(series_by_lab, key=lambda l: -sum(series_by_lab[l][0]))
     single_point = len(x) < 2
@@ -248,14 +228,9 @@ def main():
             by_key[key] = r
     gpu_dedup = list(by_key.values())
 
-    # ---- backfill job/user/lab using Slurm's own GPU binding record, for
-    # readings the ssh-based PID lookup in run.sh couldn't attribute (misses
-    # containerized/namespaced processes - nvidia-smi's process query just
-    # doesn't see them, even though the GPU is genuinely busy). scontrol
-    # always knows which (node, GPU index) it handed to which job, so this
-    # doesn't depend on process visibility at all - see sample_queue.py's
-    # gpu_bindings(). Only fills gaps; an existing PID-based attribution is
-    # left as-is. ----
+    # ---- backfill job/user/lab from Slurm's GPU binding record (scontrol),
+    # for readings the PID-based lookup in run.sh missed (e.g. containerized
+    # processes). Only fills gaps. ----
     bind_job_by_key = {(r["ts"], r["node"], r["gpu_idx"]): r["job_id"] for r in gpu_bind_rows}
     owner_by_ts_job = {(r["ts"], r["job_id"]): (r.get("user"), r.get("lab"))
                         for r in queue_rows if r.get("job_id")}
@@ -270,14 +245,10 @@ def main():
         r["job"], r["user"], r["lab"] = job_id, owner[0], owner[1]
         backfilled += 1
 
-    # ---- CPU utilization from cgroup accounting. cpu_samples.jsonl carries
-    # cumulative usage_usec per (node, raw cgroup job id) - the delta between
-    # consecutive samples of the same job, divided by wall-clock seconds,
-    # gives "CPU-equivalents busy" (cores kept continuously working) over
-    # that interval, the same units GPU-equivalents already uses. Job ids
-    # here are the raw cgroup id; job_id_map rows (from sample_queue.py's
-    # scontrol call) translate to the array-expanded display id everything
-    # else in this file joins on.
+    # ---- CPU utilization from cgroup accounting: delta of cumulative
+    # usage_usec between consecutive samples, divided by wall-clock seconds,
+    # gives CPU-equivalents busy. job_id_map translates raw cgroup ids to
+    # the display job id everything else joins on.
     raw_to_display_by_ts = defaultdict(dict)
     for r in job_id_map_rows:
         raw_to_display_by_ts[r["ts"]][r["raw_id"]] = r["job_id"]
@@ -433,14 +404,8 @@ def main():
                 overlay_y=cap_gpu)
 
     # ================= bonus: queue wait time trend =================
-    # Only jobs sprio actually scores - i.e. eligible to run right now, not
-    # blocked on an unmet dependency or array-task throttle. sprio doesn't
-    # assign a priority at all to a dependency-blocked job (confirmed against
-    # live data: reasons "Dependency"/"DependencyNeverSatisfied"/
-    # "JobArrayTaskLimit" never carry a priority value; "Resources"/QOS-limit
-    # reasons do) - so "has a priority" is Slurm's own signal of "in the
-    # scheduling queue for real," and is a more robust filter than hand-
-    # maintaining a reason-string allowlist.
+    # Only jobs sprio actually scores (has a priority) - excludes jobs
+    # blocked on a dependency or array-task throttle, not eligible to run yet.
     pending = [r for r in queue_rows if r["state"] == "PENDING"
                and r["wait_seconds"] is not None and r.get("priority") is not None]
     by_ts_wait = defaultdict(list)
@@ -473,20 +438,8 @@ def main():
         have_queue_wait = False
 
     # ================= bonus: CPU usage vs. GPU usage, decayed with a half-life =================
-    # "Usage" here mirrors how Slurm's own fairshare accounting works
-    # (PriorityDecayHalfLife=7-00:00:00, confirmed via `scontrol show
-    # config`): usage decays continuously with a 7-day half-life rather than
-    # resetting or accumulating forever, so recent usage counts far more than
-    # usage from a week ago. CPU usage computed this way is essentially what
-    # drives today's fairshare priority on this cluster - the thing that
-    # actually earns priority. GPU usage computed the identical way is what
-    # Slurm *could* weight the same way but doesn't (TRESBillingWeights is
-    # unset on partition `main` - see the note below). One point per (user,
-    # snapshot), not averaged over days - the point is to see a user's
-    # position drift over time, not collapse it to one number. Not colored by
-    # lab (this is about individual usage, not lab totals), and drawn
-    # translucent so density, not just position, is visible when many points
-    # overlap.
+    # Usage decayed on Slurm's own fairshare half-life; one point per (user,
+    # snapshot) to show drift over time rather than one collapsed number.
     cpu_raw_by_user = defaultdict(dict)
     gpu_raw_by_user = defaultdict(dict)
     for r in running:
@@ -584,82 +537,52 @@ def main():
                      f"<td align='right'>{util}</td></tr>")
     lines.append("</table>")
     lines.append("")
-    lines.append("(Row background is each lab's chart color, lightened, matching the charts "
-                 "above. GitHub strips inline CSS, so this table renders plain on github.com; "
-                 "the tint shows in renderers that keep inline styles, e.g. a local Markdown "
-                 "preview.)")
-    lines.append("")
     lines.append("## Usage over time")
     lines.append("")
     lines.append("![CPU allocation over time](assets/cpu_alloc.png)")
     lines.append("")
     lines.append("![GPU allocation over time](assets/gpu_alloc_util.png)")
     lines.append("")
-    lines.append("Both charts share the same structure: solid color is *utilized* by lab, "
-                 "translucent + hatched (same color) on top of it is that lab's *allocated "
-                 "but idle*, solid gray above that is usage that couldn't be traced to a "
-                 "job or lab, and the dashed line is total cluster capacity - any gap above "
-                 "it is unallocated headroom. CPU utilization comes from cgroup v2 "
-                 "accounting (`cpu.stat`'s `usage_usec`, cumulative CPU time per job) read "
-                 "directly off each node, since `sstat` returns nothing usable for this on "
-                 "this cluster.")
+    lines.append("Solid = utilized by lab, hatched = allocated but idle, gray = usage not "
+                 "traceable to a lab, dashed line = cluster capacity.")
     lines.append("")
-    lines.append("Attribution is cross-referenced two ways: `nvidia-smi`'s own process "
-                 "listing (misses containerized/namespaced processes), backfilled from "
-                 "Slurm's GPU-to-job binding record (`scontrol show job -dd`). "
-                 + (f"The scontrol fallback attributed **{backfilled}** GPU readings this "
-                    "run that the process-listing path missed." if backfilled else
-                    "No readings needed the fallback this run."))
+    lines.append("Attribution combines `nvidia-smi`'s process listing with Slurm's "
+                 "GPU-to-job binding record" +
+                 (f"; the latter caught **{backfilled}** readings the former missed."
+                  if backfilled else "."))
     lines.append("")
     if have_queue_wait:
         lines.append("## Queue")
         lines.append("")
         lines.append("![Queue wait time](assets/queue_wait.png)")
         lines.append("")
-        lines.append("Only jobs Slurm is actively scoring for scheduling (has a `sprio` "
-                     "priority) count as \"pending\" here - a job blocked on an unmet "
-                     "dependency or an array-task throttle isn't competing for resources "
-                     "yet, so its wait time reflects pipeline design, not cluster "
-                     "congestion.")
+        lines.append("\"Pending\" here means Slurm is actively scoring the job (has a "
+                     "`sprio` priority) - excludes jobs blocked on a dependency or "
+                     "array-task throttle.")
         lines.append("")
     if have_usage_scatter:
         lines.append("## CPU usage vs. GPU usage")
         lines.append("")
         lines.append("![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)")
         lines.append("")
-        lines.append(f"Each point is one user at one snapshot (n={len(decay_points)}), not "
-                     "averaged over time, to show how a user's position moves rather than "
-                     "collapsing it to a single number. Both axes are usage decayed with "
-                     "Slurm's own ~7-day fairshare half-life (`PriorityDecayHalfLife` on "
-                     "this cluster), not a lifetime total or a per-day average.")
+        lines.append(f"One point per user per snapshot (n={len(decay_points)}), usage "
+                     "decayed on Slurm's ~7-day fairshare half-life.")
         lines.append("")
-        lines.append("**CPU usage (x-axis) is essentially what earns priority here; GPU "
-                     "usage (y-axis) is what Slurm could weight the same way but doesn't**: "
-                     "`PriorityWeightTRES` is unset, and partition `main` has no "
-                     "`TRESBillingWeights` configured, so fairshare usage accounting bills "
-                     "by CPU count alone - a job holding 4 GPUs and 8 CPUs accrues the same "
-                     "usage debt as an 8-CPU, no-GPU job. The users worth a second look are "
-                     "in the **upper-left**: low decayed CPU usage (high, unpenalized "
-                     "fairshare priority) paired with high decayed GPU usage.")
+        lines.append("**GPU usage doesn't count toward priority on this cluster** "
+                     "(`TRESBillingWeights`/`PriorityWeightTRES` unset) - watch the "
+                     "**upper-left**: low CPU usage (high priority) with high GPU usage.")
         lines.append("")
 
     lines.append("## Recommendations")
     lines.append("")
-    lines.append("1. **Make GPU usage count toward priority.** Set `TRESBillingWeights` "
-                 "on the `main` partition to give GPUs a nonzero weight (e.g. "
-                 "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>`) "
-                 "and/or give `PriorityWeightTRES` a GPU component, then restart "
-                 "`slurmctld`. The weight value is a policy call (how many CPUs one GPU "
-                 "should be \"worth\"), not something to derive from monitoring data alone.")
+    lines.append("1. **Weight GPU usage in fairshare:** "
+                 "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` "
+                 "(or set `PriorityWeightTRES`), then restart `slurmctld`. Weight value is a "
+                 "policy call.")
     lines.append("")
-    lines.append("2. **Act on sustained low utilization, not just report it.** The per "
-                 "lab/user table above shows GPU utilization by user; the CPU vs. GPU "
-                 "usage chart above is a more direct way to spot it (upper-left quadrant). "
-                 "Two escalating steps: email a reminder once a user's utilization stays "
-                 "low for a sustained stretch, and taper their priority (QOS demotion or a "
-                 "fairshare penalty) if it doesn't improve. Not implemented here - needs a "
-                 "policy decision first (threshold, grace period, who gets cc'd, and mail "
-                 "delivery from this host).")
+    lines.append("2. **Escalate on sustained low utilization** (see table and scatter "
+                 "above): reminder, then a fairshare/QOS penalty. Needs a threshold and "
+                 "grace period decided first.")
     lines.append("")
 
     (DIR / "README.md").write_text("\n".join(lines) + "\n")
