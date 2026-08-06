@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-06T13:30:13-07:00
-Samples: 47 queue snapshots, 47 GPU snapshots
+Last updated: 2026-08-06T14:00:20-07:00
+Samples: 48 queue snapshots, 48 GPU snapshots
 
 ## Resources
 
@@ -17,21 +17,21 @@ Samples: 47 queue snapshots, 47 GPU snapshots
 ## Headline
 
 - **67.6%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **39.8%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **82.3%** average cgroup CPU utilization *when* a CPU is allocated to a job
+- **40.4%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **82.2%** average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Per lab / per user
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>467.5</td><td align='right'>3740.0</td><td align='right'>9%</td></tr>
-<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>347.0</td><td align='right'>347.0</td><td align='right'>47%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>99.0</td><td align='right'>212.0</td><td align='right'>69%</td></tr>
+<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>362.0</td><td align='right'>362.0</td><td align='right'>48%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>104.0</td><td align='right'>217.0</td><td align='right'>69%</td></tr>
 <tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>40.0</td><td align='right'>200.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>234.5</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>2550.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>234.5</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>18.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>2587.5</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
@@ -42,7 +42,7 @@ Samples: 47 queue snapshots, 47 GPU snapshots
 
 Solid = utilized by lab, hatched = allocated but idle, gray = usage not traceable to a lab, dashed line = cluster capacity.
 
-Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **1455** readings the former missed.
+Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **1481** readings the former missed.
 
 ## Queue
 
@@ -54,7 +54,7 @@ Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job bind
 
 ![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)
 
-One point per user per snapshot (n=265), usage decayed on Slurm's ~7-day fairshare half-life.
+One point per user per snapshot (n=269), usage decayed on Slurm's ~7-day fairshare half-life.
 
 **GPU usage doesn't count toward priority on this cluster** (`TRESBillingWeights`/`PriorityWeightTRES` unset) - watch the **upper-left**: low CPU usage (high priority) with high GPU usage.
 
