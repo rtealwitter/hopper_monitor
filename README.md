@@ -2,7 +2,7 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-06T14:35:18-07:00
+Last updated: 2026-08-06T14:57:30-07:00
 Samples: 49 queue snapshots, 49 GPU snapshots
 
 ## Resources
@@ -28,10 +28,10 @@ Samples: 49 queue snapshots, 49 GPU snapshots
 <tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>377.0</td><td align='right'>377.0</td><td align='right'>49%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>108.5</td><td align='right'>221.5</td><td align='right'>68%</td></tr>
 <tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>40.0</td><td align='right'>200.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>234.5</td><td align='right'>—</td></tr>
 <tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>2625.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>20.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>234.5</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
@@ -63,6 +63,4 @@ One point per user per snapshot (n=273), usage decayed on Slurm's ~7-day fairsha
 1. **Weight GPU usage in fairshare.** `TRESBillingWeights` and `PriorityWeightTRES` are both unset right now, so Slurm's fairshare score only sees CPU-seconds - a job holding 4 idle L40S GPUs costs nothing in priority as long as it isn't also holding CPUs. That's the exact failure mode the scatter above is built to catch (upper-left: low CPU usage, high GPU usage). Fix: `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` (or set `PriorityWeightTRES` cluster-wide), then `scontrol reconfigure` - a full `slurmctld` restart also works but drops in-flight priority state. A reasonable starting point for `<weight>` is the CPUs-per-GPU ratio on a GPU node (128 CPUs / 4 GPUs = 32), so one GPU costs as much fairshare as the CPU share it displaces; tune from there against next week's headline numbers (67.6% allocated, 41.1% utilized when allocated, as of this snapshot). The weight value itself is a policy call - loop in whoever owns cluster allocation policy before changing it.
 
 2. **Escalate on sustained low utilization** (see table and scatter above). Right now the clearest candidate is `user-d58f5a15` in `witter-lab`: 467.5 GPU-hours allocated at 9% average utilization, i.e. roughly 424 GPU-hours that sat idle instead of going to someone in the queue. Turning that into an automated escalation needs two decisions made up front: a utilization threshold (something like under 20% mean utilization over at least 50 allocated GPU-hours is a defensible starting bar - loose enough to skip short debugging runs, tight enough to catch parked allocations) and a grace period (how many consecutive low-utilization snapshots before it counts as "sustained" rather than a momentary lull between batches). Once those are set, the mechanism can be either soft (a bot that reads `data/gpu_samples.jsonl` and reminds the user/lab by email or Slack) or hard (a Slurm-side QOS penalty, e.g. `sacctmgr modify qos <qos> set Priority-=<n>`, applied after N consecutive offending snapshots). Neither exists yet - today the table and scatter above are a read-only signal, not an enforced policy.
-
-3. **Don't lock in a weight or threshold off one snapshot.** This report has 49 queue snapshots so far, and the CPU-vs-GPU scatter decays usage on a 7-day fairshare half-life - it needs roughly that long of continuous data before it reflects steady-state behavior rather than whoever happened to be running jobs this week. Treat recommendation 1's weight and recommendation 2's threshold as drafts; revisit both after a week or two of accumulated snapshots.
 

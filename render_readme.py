@@ -621,14 +621,6 @@ def main():
         "scatter above are a read-only signal, not an enforced policy.")
     lines.append(esc_line)
     lines.append("")
-    lines.append("3. **Don't lock in a weight or threshold off one snapshot.** This report "
-                 f"has {len(distinct_ts)} queue snapshots so far, and the CPU-vs-GPU scatter "
-                 "decays usage on a 7-day fairshare half-life - it needs roughly that long "
-                 "of continuous data before it reflects steady-state behavior rather than "
-                 "whoever happened to be running jobs this week. Treat recommendation 1's "
-                 "weight and recommendation 2's threshold as drafts; revisit both after a "
-                 "week or two of accumulated snapshots.")
-    lines.append("")
 
     (DIR / "README.md").write_text("\n".join(lines) + "\n")
 
