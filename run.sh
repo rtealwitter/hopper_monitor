@@ -75,7 +75,7 @@ fi
 
 # ---- commit + push ----
 cd "$DIR"
-git add -A -- README.md assets data >> "$LOG" 2>&1
+git add -A -- README.md assets data archive >> "$LOG" 2>&1
 if ! git diff --cached --quiet; then
   git commit -q -m "update $TS" >> "$LOG" 2>&1 && git push -q >> "$LOG" 2>&1 \
     || echo "[$TS] git commit/push FAILED" >> "$LOG"
