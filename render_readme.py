@@ -353,6 +353,51 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
     }
 
 
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def compute_open_times(queue_rows_all):
+    """Which hour-of-day and which day-of-week have historically had the
+    lowest average GPU allocation - i.e. been most 'open'. Always run over
+    all-time data (not the rolling window), so it keeps sharpening as more
+    cron ticks land, independent of the 7-day dashboard window."""
+    queue_rows = [r for r in queue_rows_all
+                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
+    totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
+    by_ts_totals = {r["ts"]: r for r in totals_rows}
+    latest_totals = totals_rows[-1] if totals_rows else {"gpus_total": 0}
+    gpus_total_fallback = latest_totals.get("gpus_total") or 1
+
+    gpus_alloc_by_ts = defaultdict(int)
+    for r in queue_rows:
+        if r["state"] == "RUNNING":
+            gpus_alloc_by_ts[r["ts"]] += r["gpus"]
+
+    distinct_ts = sorted({r["ts"] for r in queue_rows})
+    if not distinct_ts:
+        return None
+
+    pct_by_hour = defaultdict(list)
+    pct_by_weekday = defaultdict(list)
+    for ts in distinct_ts:
+        tot = by_ts_totals.get(ts, {}).get("gpus_total") or gpus_total_fallback
+        pct = 100 * gpus_alloc_by_ts.get(ts, 0) / tot
+        dt = parse_ts(ts)
+        pct_by_hour[dt.hour].append(pct)
+        pct_by_weekday[dt.weekday()].append(pct)
+
+    hour_means = {h: stats.mean(v) for h, v in pct_by_hour.items()}
+    weekday_means = {d: stats.mean(v) for d, v in pct_by_weekday.items()}
+    best_hour = min(hour_means, key=hour_means.get)
+    best_weekday = min(weekday_means, key=weekday_means.get)
+
+    return {
+        "best_hour": best_hour, "best_hour_pct": hour_means[best_hour],
+        "best_weekday": WEEKDAY_NAMES[best_weekday], "best_weekday_pct": weekday_means[best_weekday],
+        "n_days": len({parse_ts(ts).date() for ts in distinct_ts}),
+    }
+
+
 def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
            assets_dir, readme_path, window_start, window_end, img_prefix,
            live, back_link=None, archive_links=None):
@@ -390,6 +435,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     headline_week = compute_headline(gpu_rows, cpu_util_rows, queue_rows_all)
     headline_all = (compute_headline(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered)
                      if live else None)
+    open_times = compute_open_times(queue_rows_all_unfiltered) if live else None
 
     # ---- dedupe GPU readings to one row per (ts, node, gpu_idx). dict(r):
     # copy, not reference - main() reuses the same loaded row objects across
@@ -624,8 +670,22 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         have_usage_scatter = False
 
     # ================= write README =================
-    def headline_block(heading_suffix, h):
-        block = [f"## Headline{heading_suffix}", ""]
+    def live_headline_block(h_week, h_all):
+        block = ["## Headline", ""]
+        block.append(f"- **{h_week['pct_gpu_alloc']:.1f}%** (last {ROLLING_WINDOW_DAYS} days) "
+                      f"vs **{h_all['pct_gpu_alloc']:.1f}%** (all time) of the cluster's "
+                      f"{h_all['gpus_total']} GPUs allocated, averaged across samples")
+        block.append(f"- **{h_week['pct_util_when_alloc']:.1f}%** (last {ROLLING_WINDOW_DAYS} days) "
+                      f"vs **{h_all['pct_util_when_alloc']:.1f}%** (all time) average `nvidia-smi` "
+                      f"utilization *when* a GPU is allocated to a job")
+        block.append(f"- **{h_week['pct_cpu_util_when_alloc']:.1f}%** (last {ROLLING_WINDOW_DAYS} days) "
+                      f"vs **{h_all['pct_cpu_util_when_alloc']:.1f}%** (all time) average cgroup CPU "
+                      f"utilization *when* a CPU is allocated to a job")
+        block.append("")
+        return block
+
+    def archived_headline_block(h):
+        block = ["## Headline", ""]
         block.append(f"- **{h['pct_gpu_alloc']:.1f}%** of the cluster's {h['gpus_total']} GPUs "
                       f"allocated, averaged across all samples")
         block.append(f"- **{h['pct_util_when_alloc']:.1f}%** average `nvidia-smi` utilization "
@@ -635,10 +695,60 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         block.append("")
         return block
 
-    def table_block(heading_suffix, h):
-        block = [f"## Per lab / per user{heading_suffix}", "", "<table>",
+    def open_times_block(ot):
+        if not ot:
+            return []
+        block = ["## Most open times", ""]
+        block.append(f"Based on {ot['n_days']} days of history so far, `hopper.cluster` has "
+                      f"historically been most open on **{ot['best_weekday']}s** "
+                      f"({ot['best_weekday_pct']:.1f}% of GPUs allocated on average) and around "
+                      f"**{ot['best_hour']:02d}:00-{(ot['best_hour'] + 1) % 24:02d}:00** "
+                      f"({ot['best_hour_pct']:.1f}% of GPUs allocated on average). Recomputed "
+                      "from all-time data on every cron tick, so it sharpens as more history "
+                      "accumulates.")
+        block.append("")
+        return block
+
+    def live_table_block(h_week, h_all):
+        week_by_key = {(r["user"], r["lab"]): r for r in h_week["table_rows"]}
+        rows = []
+        for r in h_all["table_rows"]:
+            key = (r["user"], r["lab"])
+            w = week_by_key.get(key)
+            rows.append({
+                "lab": r["lab"], "user": r["user"],
+                "gpu_hours_week": w["gpu_hours"] if w else 0.0,
+                "gpu_hours_all": r["gpu_hours"],
+                "util_week": w["util_pct"] if w else None,
+                "util_all": r["util_pct"],
+            })
+        rows.sort(key=lambda r: (-r["gpu_hours_week"], -r["gpu_hours_all"]))
+
+        block = ["## Per lab / per user", "", "<table>",
+                  "<tr><th>Lab</th><th>User</th>"
+                  f"<th align='right'>GPU-hours (last {ROLLING_WINDOW_DAYS}d)</th>"
+                  "<th align='right'>GPU-hours (all time)</th>"
+                  f"<th align='right'>GPU util (last {ROLLING_WINDOW_DAYS}d)</th>"
+                  "<th align='right'>GPU util (all time)</th></tr>"]
+        for row in rows:
+            util_week = f"{row['util_week']:.0f}%" if row["util_week"] is not None else "—"
+            util_all = f"{row['util_all']:.0f}%" if row["util_all"] is not None else "—"
+            color = h_all["colors"].get(row["lab"], OTHER_COLOR)
+            bg = lighten(color)
+            block.append(f"<tr style='background-color:{bg}'>"
+                          f"<td>{row['lab']}</td><td>{row['user']}</td>"
+                          f"<td align='right'>{row['gpu_hours_week']:.1f}</td>"
+                          f"<td align='right'>{row['gpu_hours_all']:.1f}</td>"
+                          f"<td align='right'>{util_week}</td>"
+                          f"<td align='right'>{util_all}</td></tr>")
+        block.append("</table>")
+        block.append("")
+        return block
+
+    def archived_table_block(h):
+        block = ["## Per lab / per user", "", "<table>",
                   "<tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th>"
-                  "<th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>"]
+                  "<th align='right'>GPU utilization</th></tr>"]
         for row in h["table_rows"]:
             util = f"{row['util_pct']:.0f}%" if row["util_pct"] is not None else "—"
             color = h["colors"].get(row["lab"], OTHER_COLOR)
@@ -646,7 +756,6 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
             block.append(f"<tr style='background-color:{bg}'>"
                           f"<td>{row['lab']}</td><td>{row['user']}</td>"
                           f"<td align='right'>{row['gpu_hours']:.1f}</td>"
-                          f"<td align='right'>{row['cpu_hours']:.1f}</td>"
                           f"<td align='right'>{util}</td></tr>")
         block.append("</table>")
         block.append("")
@@ -676,10 +785,9 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         lines.append("| `gpu01`-`gpu15` | 15 | 128 | 750 GB | 4× NVIDIA L40S (48 GB VRAM) |")
         lines.append("| `himem01`-`himem02` | 2 | 128 | 3000 GB | none |")
         lines.append("")
-        lines += headline_block(" (all time)", headline_all)
-        lines += table_block(" (all time)", headline_all)
-        lines += headline_block(f" (last {ROLLING_WINDOW_DAYS} days)", headline_week)
-        lines += table_block(f" (last {ROLLING_WINDOW_DAYS} days)", headline_week)
+        lines += live_headline_block(headline_week, headline_all)
+        lines += open_times_block(open_times)
+        lines += live_table_block(headline_week, headline_all)
     else:
         lines.append(f"Archived weekly snapshot: **{window_start:%Y-%m-%d} to "
                      f"{(window_end - timedelta(days=1)):%Y-%m-%d}**. Usernames are "
@@ -691,8 +799,8 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         lines.append(f"Samples: {headline_week['n_queue_snapshots']} queue snapshots, "
                      f"{headline_week['n_gpu_snapshots']} GPU snapshots")
         lines.append("")
-        lines += headline_block("", headline_week)
-        lines += table_block("", headline_week)
+        lines += archived_headline_block(headline_week)
+        lines += archived_table_block(headline_week)
 
     lines.append("## Usage over time")
     lines.append("")

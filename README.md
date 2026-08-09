@@ -2,7 +2,7 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-08-08T22:30:09-07:00
+Last updated: 2026-08-08T22:51:28-07:00
 Samples: 161 queue snapshots total (161 in the last 7 days), 161 GPU snapshots total (161 in the last 7 days)
 
 ## Resources
@@ -14,55 +14,36 @@ Samples: 161 queue snapshots total (161 in the last 7 days), 161 GPU snapshots t
 | `gpu01`-`gpu15` | 15 | 128 | 750 GB | 4× NVIDIA L40S (48 GB VRAM) |
 | `himem01`-`himem02` | 2 | 128 | 3000 GB | none |
 
-## Headline (all time)
+## Headline
 
-- **42.2%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **45.1%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **88.5%** average cgroup CPU utilization *when* a CPU is allocated to a job
+- **42.2%** (last 7 days) vs **42.2%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
+- **45.1%** (last 7 days) vs **45.1%** (all time) average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **88.5%** (last 7 days) vs **88.5%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
 
-## Per lab / per user (all time)
+## Most open times
 
-<table>
-<tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
-<tr style='background-color:#d8ecd8'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1014.0</td><td align='right'>1014.0</td><td align='right'>41%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>493.5</td><td align='right'>1027.0</td><td align='right'>68%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>467.5</td><td align='right'>3740.0</td><td align='right'>9%</td></tr>
-<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>40.0</td><td align='right'>200.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>22.5</td><td align='right'>54.0</td><td align='right'>67%</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-dad71a72</td><td align='right'>0.0</td><td align='right'>6.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>426.5</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>4080.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>984.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>209.0</td><td align='right'>—</td></tr>
-</table>
+Based on 4 days of history so far, `hopper.cluster` has historically been most open on **Saturdays** (29.0% of GPUs allocated on average) and around **22:00-23:00** (27.5% of GPUs allocated on average). Recomputed from all-time data on every cron tick, so it sharpens as more history accumulates.
 
-## Headline (last 7 days)
-
-- **42.2%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **45.1%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **88.5%** average cgroup CPU utilization *when* a CPU is allocated to a job
-
-## Per lab / per user (last 7 days)
+## Per lab / per user
 
 <table>
-<tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>CPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
-<tr style='background-color:#d8ecd8'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1014.0</td><td align='right'>1014.0</td><td align='right'>41%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>493.5</td><td align='right'>1027.0</td><td align='right'>68%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>467.5</td><td align='right'>3740.0</td><td align='right'>9%</td></tr>
-<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>40.0</td><td align='right'>200.0</td><td align='right'>71%</td></tr>
-<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>22.5</td><td align='right'>54.0</td><td align='right'>67%</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-dad71a72</td><td align='right'>0.0</td><td align='right'>6.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>426.5</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>4080.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>984.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>16.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>209.0</td><td align='right'>—</td></tr>
+<tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
+<tr style='background-color:#d8ecd8'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1014.0</td><td align='right'>1014.0</td><td align='right'>41%</td><td align='right'>41%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>493.5</td><td align='right'>493.5</td><td align='right'>68%</td><td align='right'>68%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>467.5</td><td align='right'>467.5</td><td align='right'>9%</td><td align='right'>9%</td></tr>
+<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>40.0</td><td align='right'>40.0</td><td align='right'>71%</td><td align='right'>71%</td></tr>
+<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>22.5</td><td align='right'>22.5</td><td align='right'>67%</td><td align='right'>67%</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-dad71a72</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-08-01 22:30 to 2026-08-08 22:30** (PDT).
+Charts below cover the trailing 7 days: **2026-08-01 22:51 to 2026-08-08 22:51** (PDT).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
