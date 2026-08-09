@@ -2,8 +2,10 @@
 """
 Reads data/gpu_samples.jsonl (nvidia-smi, via ssh to GPU nodes) and
 data/queue_samples.jsonl (squeue + sprio + scontrol, login node only) and
-writes assets/*.png + README.md. Runs on a compute node via `sbatch --wait`
-from run.sh - never on the login node (no numpy/matplotlib there).
+writes assets/*.png + README.md (rolling last 7 days), plus one archived
+snapshot per fully-elapsed calendar week under archive/<mon>_<sun>/. Runs on
+a compute node via `sbatch --wait` from run.sh - never on the login node (no
+numpy/matplotlib there).
 
 No pandas - stdlib json/statistics/collections only, matching the rest of this
 repo's minimalism.
@@ -22,6 +24,10 @@ import matplotlib.patches as mpatches
 DIR = Path(__file__).resolve().parent
 ASSETS = DIR / "assets"
 ASSETS.mkdir(exist_ok=True)
+ARCHIVE = DIR / "archive"
+ARCHIVE.mkdir(exist_ok=True)
+
+ROLLING_WINDOW_DAYS = 7
 
 # Matches Slurm's own PriorityDecayHalfLife, so "decayed usage" here tracks
 # fairshare accounting rather than a lifetime-cumulative total.
@@ -69,6 +75,12 @@ def load_jsonl(path):
 
 def parse_ts(ts):
     return datetime.fromisoformat(ts)
+
+
+def monday_of(dt):
+    """00:00 on the Monday of dt's calendar week, same tz as dt."""
+    monday_date = (dt - timedelta(days=dt.weekday())).date()
+    return datetime.combine(monday_date, datetime.min.time(), tzinfo=dt.tzinfo)
 
 
 def rgba(hexcolor, alpha):
@@ -201,10 +213,21 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
     plt.close(fig)
 
 
-def main():
-    gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
-    cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
-    queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
+def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
+           assets_dir, readme_path, window_start, window_end, img_prefix,
+           live, back_link=None, archive_links=None):
+    """Builds one full report (charts + README.md) from samples in
+    [window_start, window_end). Used both for the live rolling-7-day
+    dashboard (assets_dir=assets/, img_prefix="assets/") and for a single
+    archived calendar week (assets_dir=readme_path.parent, img_prefix="")."""
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    def in_window(r):
+        return window_start <= parse_ts(r["ts"]) < window_end
+
+    gpu_rows = [r for r in gpu_rows_all if in_window(r)]
+    cpu_util_rows = [r for r in cpu_util_rows_all if in_window(r)]
+    queue_rows_all = [r for r in queue_rows_all_unfiltered if in_window(r)]
     queue_rows = [r for r in queue_rows_all
                   if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
@@ -212,10 +235,13 @@ def main():
     job_id_map_rows = [r for r in queue_rows_all if r.get("kind") == "job_id_map"]
 
     if not gpu_rows and not queue_rows:
-        (DIR / "README.md").write_text(
-            "# hopper_monitor\n\nNo samples recorded yet - check back after "
-            "the next 30-minute cron tick.\n"
-        )
+        lines = ["# hopper_monitor", "",
+                  f"No samples between {window_start:%Y-%m-%d} and "
+                  f"{window_end:%Y-%m-%d}."]
+        if archive_links:
+            lines += ["", "## Weekly archives", ""]
+            lines += [f"- [{label}]({link})" for label, link in archive_links]
+        readme_path.write_text("\n".join(lines) + "\n")
         return
 
     # ---- dedupe GPU readings to one row per (ts, node, gpu_idx) ----
@@ -381,7 +407,7 @@ def main():
     unattrib_cpu_y = [max(0.0, by_ts_total_cpu_util.get(t, 0.0) - attributed_cpu_total[t])
                        for t in ts_sorted_cpu]
     cap_cpu = [by_ts_totals.get(t, {}).get("cpus_total") or cpus_total for t in ts_sorted_cpu]
-    usage_chart(ASSETS / "cpu_alloc.png", "CPU allocation over time (by lab)",
+    usage_chart(assets_dir / "cpu_alloc.png", "CPU allocation over time (by lab)",
                 "CPUs", x_cpu, series_cpu, colors, shown,
                 unattrib_y=unattrib_cpu_y, unattrib_label="computing, unattributed",
                 overlay_y=cap_cpu)
@@ -407,7 +433,7 @@ def main():
     unattrib_y = [max(0.0, by_ts_total_util[t] - attributed_total[t]) for t in ts_sorted_gpu]
     cap_gpu = [by_ts_totals.get(t, {}).get("gpus_total") or gpus_total for t in ts_sorted_gpu]
 
-    usage_chart(ASSETS / "gpu_alloc_util.png", "GPU allocation over time (by lab)",
+    usage_chart(assets_dir / "gpu_alloc_util.png", "GPU allocation over time (by lab)",
                 "GPUs", x_gpu, series_gpu, colors, shown,
                 unattrib_y=unattrib_y, unattrib_label="computing, unattributed",
                 overlay_y=cap_gpu)
@@ -415,16 +441,22 @@ def main():
     # ================= bonus: queue wait time trend =================
     # Only jobs sprio actually scores (has a priority) - excludes jobs
     # blocked on a dependency or array-task throttle, not eligible to run yet.
+    # x-axis is every queue snapshot (same timestamps as the alloc charts
+    # above), not just the ones with an eligible pending job - a snapshot
+    # with nothing eligible to wait genuinely had a 0-hour queue, not a
+    # missing data point.
     pending = [r for r in queue_rows if r["state"] == "PENDING"
                and r["wait_seconds"] is not None and r.get("priority") is not None]
     by_ts_wait = defaultdict(list)
     for r in pending:
         by_ts_wait[r["ts"]].append(r["wait_seconds"] / 3600.0)
-    if by_ts_wait:
-        ts_sorted4 = sorted(by_ts_wait, key=parse_ts)
+    if queue_rows:
+        ts_sorted4 = sorted({r["ts"] for r in queue_rows}, key=parse_ts)
         x4 = [parse_ts(t) for t in ts_sorted4]
-        med = [percentile(sorted(by_ts_wait[t]), 50) for t in ts_sorted4]
-        p90 = [percentile(sorted(by_ts_wait[t]), 90) for t in ts_sorted4]
+        med = [percentile(sorted(by_ts_wait[t]), 50) if t in by_ts_wait else 0.0
+               for t in ts_sorted4]
+        p90 = [percentile(sorted(by_ts_wait[t]), 90) if t in by_ts_wait else 0.0
+               for t in ts_sorted4]
         fig, ax = plt.subplots(figsize=(9, 4))
         ax.plot(x4, med, color=LAB_COLORS[0], linewidth=2, marker="o", markersize=4,
                  label="median wait")
@@ -438,7 +470,7 @@ def main():
         fig.autofmt_xdate()
         ax.legend(frameon=False, fontsize=8)
         fig.tight_layout()
-        fig.savefig(ASSETS / "queue_wait.png", dpi=150)
+        fig.savefig(assets_dir / "queue_wait.png", dpi=150)
         plt.close(fig)
         have_queue_wait = True
     else:
@@ -491,7 +523,7 @@ def main():
                 transform=ax.transAxes, ha="left", va="top", fontsize=8,
                 color=INK_SECONDARY, style="italic")
         fig.tight_layout()
-        fig.savefig(ASSETS / "cpu_gpu_usage.png", dpi=150)
+        fig.savefig(assets_dir / "cpu_gpu_usage.png", dpi=150)
         plt.close(fig)
         have_usage_scatter = True
     else:
@@ -501,24 +533,39 @@ def main():
     lines = []
     lines.append("# hopper_monitor")
     lines.append("")
-    lines.append("Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, "
-                 "updated every 30 minutes by cron. Usernames are anonymized to a "
-                 "stable per-account pseudonym; lab names are real.")
-    lines.append("")
-    lines.append(f"Last updated: {datetime.now().astimezone().isoformat(timespec='seconds')}")
+    if live:
+        lines.append("Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, "
+                     "updated every 30 minutes by cron. Usernames are anonymized to a "
+                     "stable per-account pseudonym; lab names are real.")
+        lines.append("")
+        lines.append(f"Showing the trailing {ROLLING_WINDOW_DAYS} days: "
+                     f"**{window_start:%Y-%m-%d %H:%M} to {window_end:%Y-%m-%d %H:%M}** "
+                     f"({window_end.strftime('%Z') or 'local time'}). Older data lives in "
+                     "the dated weekly archives below.")
+        lines.append("")
+        lines.append(f"Last updated: {window_end.isoformat(timespec='seconds')}")
+    else:
+        lines.append(f"Archived weekly snapshot: **{window_start:%Y-%m-%d} to "
+                     f"{(window_end - timedelta(days=1)):%Y-%m-%d}**. Usernames are "
+                     "anonymized to a stable per-account pseudonym; lab names are real.")
+        lines.append("")
+        if back_link:
+            lines.append(f"[Back to the live dashboard]({back_link})")
+            lines.append("")
     lines.append(f"Samples: {len(distinct_ts)} queue snapshots, "
                  f"{len({r['ts'] for r in gpu_dedup})} GPU snapshots")
     lines.append("")
-    lines.append("## Resources")
-    lines.append("")
-    lines.append(f"`hopper.cluster` currently reports **{gpus_total} GPUs** and "
-                 f"**{cpus_total} CPUs** total:")
-    lines.append("")
-    lines.append("| Nodes | Count | CPUs/node | RAM/node | GPUs/node |")
-    lines.append("|---|---:|---:|---:|---|")
-    lines.append("| `gpu01`-`gpu15` | 15 | 128 | 750 GB | 4× NVIDIA L40S (48 GB VRAM) |")
-    lines.append("| `himem01`-`himem02` | 2 | 128 | 3000 GB | none |")
-    lines.append("")
+    if live:
+        lines.append("## Resources")
+        lines.append("")
+        lines.append(f"`hopper.cluster` currently reports **{gpus_total} GPUs** and "
+                     f"**{cpus_total} CPUs** total:")
+        lines.append("")
+        lines.append("| Nodes | Count | CPUs/node | RAM/node | GPUs/node |")
+        lines.append("|---|---:|---:|---:|---|")
+        lines.append("| `gpu01`-`gpu15` | 15 | 128 | 750 GB | 4× NVIDIA L40S (48 GB VRAM) |")
+        lines.append("| `himem01`-`himem02` | 2 | 128 | 3000 GB | none |")
+        lines.append("")
     lines.append("## Headline")
     lines.append("")
     lines.append(f"- **{pct_gpu_alloc:.1f}%** of the cluster's {gpus_total} GPUs allocated, "
@@ -546,9 +593,9 @@ def main():
     lines.append("")
     lines.append("## Usage over time")
     lines.append("")
-    lines.append("![CPU allocation over time](assets/cpu_alloc.png)")
+    lines.append(f"![CPU allocation over time]({img_prefix}cpu_alloc.png)")
     lines.append("")
-    lines.append("![GPU allocation over time](assets/gpu_alloc_util.png)")
+    lines.append(f"![GPU allocation over time]({img_prefix}gpu_alloc_util.png)")
     lines.append("")
     lines.append("Solid = utilized by lab, hatched = allocated but idle, gray = usage not "
                  "traceable to a lab, dashed line = cluster capacity.")
@@ -561,7 +608,7 @@ def main():
     if have_queue_wait:
         lines.append("## Queue")
         lines.append("")
-        lines.append("![Queue wait time](assets/queue_wait.png)")
+        lines.append(f"![Queue wait time]({img_prefix}queue_wait.png)")
         lines.append("")
         lines.append("\"Pending\" here means Slurm is actively scoring the job (has a "
                      "`sprio` priority) - excludes jobs blocked on a dependency or "
@@ -570,7 +617,7 @@ def main():
     if have_usage_scatter:
         lines.append("## CPU usage vs. GPU usage")
         lines.append("")
-        lines.append("![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)")
+        lines.append(f"![CPU usage vs GPU usage, decayed]({img_prefix}cpu_gpu_usage.png)")
         lines.append("")
         lines.append(f"One point per user per snapshot (n={len(decay_points)}), usage "
                      "decayed on Slurm's ~7-day fairshare half-life.")
@@ -580,49 +627,108 @@ def main():
                      "**upper-left**: low CPU usage (high priority) with high GPU usage.")
         lines.append("")
 
-    lines.append("## Recommendations")
-    lines.append("")
-    lines.append("1. **Weight GPU usage in fairshare.** `TRESBillingWeights` and "
-                 "`PriorityWeightTRES` are both unset right now, so Slurm's fairshare "
-                 "score only sees CPU-seconds - a job holding 4 idle L40S GPUs costs "
-                 "nothing in priority as long as it isn't also holding CPUs. That's the "
-                 "exact failure mode the scatter above is built to catch (upper-left: low "
-                 "CPU usage, high GPU usage). Fix: "
-                 "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` "
-                 "(or set `PriorityWeightTRES` cluster-wide), then `scontrol reconfigure` - "
-                 "a full `slurmctld` restart also works but drops in-flight priority state. "
-                 "A reasonable starting point for `<weight>` is the CPUs-per-GPU ratio on a "
-                 "GPU node (128 CPUs / 4 GPUs = 32), so one GPU costs as much fairshare as "
-                 f"the CPU share it displaces; tune from there against next week's headline "
-                 f"numbers ({pct_gpu_alloc:.1f}% allocated, {pct_util_when_alloc:.1f}% "
-                 "utilized when allocated, as of this snapshot). The weight value itself is "
-                 "a policy call - loop in whoever owns cluster allocation policy before "
-                 "changing it.")
-    lines.append("")
-    esc_line = ("2. **Escalate on sustained low utilization** (see table and scatter above). ")
-    if worst_offender:
-        esc_line += (
-            f"Right now the clearest candidate is `{worst_offender['user']}` in "
-            f"`{worst_offender['lab']}`: {worst_offender['gpu_hours']:.1f} GPU-hours "
-            f"allocated at {worst_offender['util_pct']:.0f}% average utilization, i.e. "
-            f"roughly {worst_offender['gpu_hours'] * (1 - worst_offender['util_pct'] / 100):.0f} "
-            "GPU-hours that sat idle instead of going to someone in the queue. ")
-    esc_line += (
-        "Turning that into an automated escalation needs two decisions made up front: a "
-        "utilization threshold (something like under 20% mean utilization over at least "
-        f"{ESCALATION_MIN_GPU_HOURS:.0f} allocated GPU-hours is a defensible starting bar - "
-        "loose enough to skip short debugging runs, tight enough to catch parked "
-        "allocations) and a grace period (how many consecutive low-utilization snapshots "
-        "before it counts as \"sustained\" rather than a momentary lull between batches). "
-        "Once those are set, the mechanism can be either soft (a bot that reads "
-        "`data/gpu_samples.jsonl` and reminds the user/lab by email or Slack) or hard (a "
-        "Slurm-side QOS penalty, e.g. `sacctmgr modify qos <qos> set Priority-=<n>`, applied "
-        "after N consecutive offending snapshots). Neither exists yet - today the table and "
-        "scatter above are a read-only signal, not an enforced policy.")
-    lines.append(esc_line)
-    lines.append("")
+    if live and archive_links:
+        lines.append("## Weekly archives")
+        lines.append("")
+        lines.append("Dated snapshots of this dashboard, one per fully-elapsed calendar week:")
+        lines.append("")
+        for label, link in archive_links:
+            lines.append(f"- [{label}]({link})")
+        lines.append("")
 
-    (DIR / "README.md").write_text("\n".join(lines) + "\n")
+    if live:
+        lines.append("## Recommendations")
+        lines.append("")
+        lines.append("1. **Weight GPU usage in fairshare.** `TRESBillingWeights` and "
+                     "`PriorityWeightTRES` are both unset right now, so Slurm's fairshare "
+                     "score only sees CPU-seconds - a job holding 4 idle L40S GPUs costs "
+                     "nothing in priority as long as it isn't also holding CPUs. That's the "
+                     "exact failure mode the scatter above is built to catch (upper-left: low "
+                     "CPU usage, high GPU usage). Fix: "
+                     "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` "
+                     "(or set `PriorityWeightTRES` cluster-wide), then `scontrol reconfigure` - "
+                     "a full `slurmctld` restart also works but drops in-flight priority state. "
+                     "A reasonable starting point for `<weight>` is the CPUs-per-GPU ratio on a "
+                     "GPU node (128 CPUs / 4 GPUs = 32), so one GPU costs as much fairshare as "
+                     f"the CPU share it displaces; tune from there against next week's headline "
+                     f"numbers ({pct_gpu_alloc:.1f}% allocated, {pct_util_when_alloc:.1f}% "
+                     "utilized when allocated, as of this snapshot). The weight value itself is "
+                     "a policy call - loop in whoever owns cluster allocation policy before "
+                     "changing it.")
+        lines.append("")
+        esc_line = ("2. **Escalate on sustained low utilization** (see table and scatter above). ")
+        if worst_offender:
+            esc_line += (
+                f"Right now the clearest candidate is `{worst_offender['user']}` in "
+                f"`{worst_offender['lab']}`: {worst_offender['gpu_hours']:.1f} GPU-hours "
+                f"allocated at {worst_offender['util_pct']:.0f}% average utilization, i.e. "
+                f"roughly {worst_offender['gpu_hours'] * (1 - worst_offender['util_pct'] / 100):.0f} "
+                "GPU-hours that sat idle instead of going to someone in the queue. ")
+        esc_line += (
+            "Turning that into an automated escalation needs two decisions made up front: a "
+            "utilization threshold (something like under 20% mean utilization over at least "
+            f"{ESCALATION_MIN_GPU_HOURS:.0f} allocated GPU-hours is a defensible starting bar - "
+            "loose enough to skip short debugging runs, tight enough to catch parked "
+            "allocations) and a grace period (how many consecutive low-utilization snapshots "
+            "before it counts as \"sustained\" rather than a momentary lull between batches). "
+            "Once those are set, the mechanism can be either soft (a bot that reads "
+            "`data/gpu_samples.jsonl` and reminds the user/lab by email or Slack) or hard (a "
+            "Slurm-side QOS penalty, e.g. `sacctmgr modify qos <qos> set Priority-=<n>`, applied "
+            "after N consecutive offending snapshots). Neither exists yet - today the table and "
+            "scatter above are a read-only signal, not an enforced policy.")
+        lines.append(esc_line)
+        lines.append("")
+
+    readme_path.write_text("\n".join(lines) + "\n")
+
+
+def main():
+    gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
+    cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
+    queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
+    queue_rows_only = [r for r in queue_rows_all
+                        if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
+
+    if not gpu_rows and not queue_rows_only:
+        (DIR / "README.md").write_text(
+            "# hopper_monitor\n\nNo samples recorded yet - check back after "
+            "the next 30-minute cron tick.\n"
+        )
+        return
+
+    now = datetime.now().astimezone()
+
+    # ================= weekly archive catch-up =================
+    # One dated snapshot per fully-elapsed calendar week (Monday-Sunday).
+    # Idempotent: a week's folder, once created, is never regenerated - each
+    # archive is a frozen record of that week, not a rolling one.
+    all_ts = sorted({parse_ts(r["ts"]) for r in gpu_rows} |
+                     {parse_ts(r["ts"]) for r in queue_rows_only} |
+                     {parse_ts(r["ts"]) for r in cpu_util_rows})
+    if all_ts:
+        week_start = monday_of(all_ts[0])
+        while week_start + timedelta(days=7) <= now:
+            week_end = week_start + timedelta(days=7)
+            has_data = any(week_start <= t < week_end for t in all_ts)
+            if has_data:
+                label = f"{week_start:%Y-%m-%d}_{(week_end - timedelta(days=1)):%Y-%m-%d}"
+                week_dir = ARCHIVE / label
+                if not week_dir.exists():
+                    render(gpu_rows, cpu_util_rows, queue_rows_all,
+                           week_dir, week_dir / "README.md",
+                           week_start, week_end, img_prefix="", live=False,
+                           back_link="../../README.md")
+            week_start += timedelta(days=7)
+
+    archive_links = sorted(
+        ((p.name, f"archive/{p.name}/README.md") for p in ARCHIVE.iterdir() if p.is_dir()),
+        reverse=True,
+    )
+
+    # ================= live rolling-window dashboard =================
+    render(gpu_rows, cpu_util_rows, queue_rows_all, ASSETS, DIR / "README.md",
+           now - timedelta(days=ROLLING_WINDOW_DAYS), now, img_prefix="assets/",
+           live=True, archive_links=archive_links)
 
 
 if __name__ == "__main__":
