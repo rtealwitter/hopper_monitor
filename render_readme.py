@@ -11,6 +11,7 @@ No pandas - stdlib json/statistics/collections only, matching the rest of this
 repo's minimalism.
 """
 import json
+import math
 import statistics as stats
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -146,9 +147,37 @@ def percentile(sorted_vals, p):
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
 
+def warp_time_axis(ax, x_datetimes, ref, scale_hours=3.0):
+    """Warp a datetime axis so distance-from-`ref` (typically "now") is
+    log-scaled: recent samples spread out for a close-up view, older ones
+    compress toward the left - a fisheye toward the present rather than a
+    uniform timeline. Only meaningful for the live rolling dashboard, where
+    `ref` is an actual "now"; archived weeks (a frozen past week with no
+    "now" of their own) skip this and keep a plain linear time axis. Sets
+    tick positions/labels on `ax` in human terms and returns the warped x
+    positions to plot against, same order as x_datetimes."""
+    def warp(dt):
+        delta_h = max((ref - dt).total_seconds() / 3600.0, 0.0)
+        return -math.log1p(delta_h / scale_hours)
+
+    x_warped = [warp(dt) for dt in x_datetimes]
+
+    max_h = max((ref - dt).total_seconds() / 3600.0 for dt in x_datetimes)
+    candidates = [0, 1, 3, 6, 12, 24, 48, 96, 168, 336]
+    ticks_h = [h for h in candidates if h <= max_h] or [0]
+    if ticks_h[-1] < max_h:
+        ticks_h.append(round(max_h))
+    tick_pos = [warp(ref - timedelta(hours=h)) for h in ticks_h]
+    tick_labels = ["now" if h == 0 else (f"{h}h ago" if h < 24 else f"{h / 24:g}d ago")
+                   for h in ticks_h]
+    ax.set_xticks(tick_pos)
+    ax.set_xticklabels(tick_labels)
+    return x_warped
+
+
 def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
                  unattrib_y=None, unattrib_label="usage, unattributed",
-                 overlay_y=None, overlay_label="cluster capacity"):
+                 overlay_y=None, overlay_label="cluster capacity", warp_ref=None):
     """series_by_lab: {lab: (utilized_list, idle_list)}, idle_list None if
     the chart has no utilization concept (CPU: allocation only). Stacks each
     lab's utilized (solid) + idle (hatched, same color), then unattrib_y
@@ -157,6 +186,9 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
     labs = sorted(series_by_lab, key=lambda l: -sum(series_by_lab[l][0]))
     single_point = len(x) < 2
     has_idle = any(idle is not None for _, idle in series_by_lab.values())
+
+    x_plot = warp_time_axis(ax, x, warp_ref) if warp_ref is not None else x
+    bar_width = 0.05 if warp_ref is not None else 0.01
 
     entries = []  # (label_or_None, values, facecolor, edgecolor, hatch)
     for l in labs:
@@ -172,13 +204,13 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
             bottom = 0
             for label, vals, fc, ec, hatch in entries:
                 v = vals[0]
-                ax.bar(x[0], v, bottom=bottom, width=0.01, color=fc,
+                ax.bar(x_plot[0], v, bottom=bottom, width=bar_width, color=fc,
                        edgecolor=(fc if ec == "none" else ec), hatch=hatch, label=label)
                 bottom += v
         else:
             all_y = [e[1] for e in entries]
             all_colors = [e[2] for e in entries]
-            polys = ax.stackplot(x, *all_y, colors=all_colors, edgecolor=SURFACE, linewidth=1)
+            polys = ax.stackplot(x_plot, *all_y, colors=all_colors, edgecolor=SURFACE, linewidth=1)
             for poly, (label, vals, fc, ec, hatch) in zip(polys, entries):
                 if hatch:
                     poly.set_hatch(hatch)
@@ -188,19 +220,25 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
                     poly.set_label(label)
     if overlay_y is not None:
         if len(x) < 2:
-            ax.scatter(x, overlay_y, color=INK_MUTED, marker="_", s=300,
+            ax.scatter(x_plot, overlay_y, color=INK_MUTED, marker="_", s=300,
                        linewidth=1.5, label=overlay_label)
         else:
-            ax.plot(x, overlay_y, color=INK_MUTED, linewidth=1.5,
+            ax.plot(x_plot, overlay_y, color=INK_MUTED, linewidth=1.5,
                      linestyle="--", label=overlay_label)
-    all_x = list(x)
+    all_x = list(x_plot)
     if all_x:
         lo, hi = min(all_x), max(all_x)
-        pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
+        if warp_ref is not None:
+            pad = 0.05 if lo == hi else (hi - lo) * 0.05
+        else:
+            pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
         ax.set_xlim(lo - pad, hi + pad)
     ax.set_title(title, color=INK, fontsize=12, loc="left")
     ax.set_ylabel(ylabel)
-    fig.autofmt_xdate()
+    if warp_ref is not None:
+        plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
+    else:
+        fig.autofmt_xdate()
     handles, labels_ = ax.get_legend_handles_labels()
     if has_idle:
         handles.append(mpatches.Patch(facecolor=rgba(INK_MUTED, 0.35), edgecolor=INK_MUTED,
@@ -407,6 +445,10 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     archived calendar week (assets_dir=readme_path.parent, img_prefix="")."""
     assets_dir.mkdir(parents=True, exist_ok=True)
 
+    # Warping toward "now" only makes sense for the live rolling dashboard -
+    # an archived week is a frozen past period with no "now" of its own.
+    warp_ref = window_end if live else None
+
     def in_window(r):
         return window_start <= parse_ts(r["ts"]) < window_end
 
@@ -550,7 +592,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     usage_chart(assets_dir / "cpu_alloc.png", "CPU allocation over time (by lab)",
                 "CPUs", x_cpu, series_cpu, colors, shown,
                 unattrib_y=unattrib_cpu_y, unattrib_label="computing, unattributed",
-                overlay_y=cap_cpu)
+                overlay_y=cap_cpu, warp_ref=warp_ref)
 
     by_ts_lab_util = defaultdict(lambda: defaultdict(float))
     by_ts_total_util = defaultdict(float)
@@ -576,7 +618,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     usage_chart(assets_dir / "gpu_alloc_util.png", "GPU allocation over time (by lab)",
                 "GPUs", x_gpu, series_gpu, colors, shown,
                 unattrib_y=unattrib_y, unattrib_label="computing, unattributed",
-                overlay_y=cap_gpu)
+                overlay_y=cap_gpu, warp_ref=warp_ref)
 
     # ================= bonus: queue wait time trend =================
     # Only jobs sprio actually scores (has a priority) - excludes jobs
@@ -598,16 +640,23 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         p90 = [percentile(sorted(by_ts_wait[t]), 90) if t in by_ts_wait else 0.0
                for t in ts_sorted4]
         fig, ax = plt.subplots(figsize=(9, 4))
-        ax.plot(x4, med, color=LAB_COLORS[0], linewidth=2, marker="o", markersize=4,
+        x4_plot = warp_time_axis(ax, x4, warp_ref) if warp_ref is not None else x4
+        ax.plot(x4_plot, med, color=LAB_COLORS[0], linewidth=2, marker="o", markersize=4,
                  label="median wait")
-        ax.plot(x4, p90, color=LAB_COLORS[1], linewidth=1.5, linestyle="--",
+        ax.plot(x4_plot, p90, color=LAB_COLORS[1], linewidth=1.5, linestyle="--",
                  marker="o", markersize=4, label="p90 wait")
-        lo, hi = min(x4), max(x4)
-        pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
+        lo, hi = min(x4_plot), max(x4_plot)
+        if warp_ref is not None:
+            pad = 0.05 if lo == hi else (hi - lo) * 0.05
+        else:
+            pad = timedelta(minutes=30) if lo == hi else (hi - lo) * 0.05
         ax.set_xlim(lo - pad, hi + pad)
         ax.set_title("Queue wait time (eligible pending jobs)", loc="left")
         ax.set_ylabel("hours waited so far")
-        fig.autofmt_xdate()
+        if warp_ref is not None:
+            plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
+        else:
+            fig.autofmt_xdate()
         ax.legend(frameon=False, fontsize=8)
         fig.tight_layout()
         fig.savefig(assets_dir / "queue_wait.png", dpi=150)
