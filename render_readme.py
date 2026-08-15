@@ -658,6 +658,13 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         ax.scatter(cpu_vals, gpu_vals, color=INK, alpha=0.12, s=26, linewidth=0)
         ax.set_xscale("log")
         ax.set_yscale("log")
+        lo = min(ax.get_xlim()[0], ax.get_ylim()[0])
+        hi = max(ax.get_xlim()[1], ax.get_ylim()[1])
+        ax.plot([lo, hi], [lo, hi], color=INK_SECONDARY, linewidth=1,
+                 linestyle="--", label="y = x", zorder=0)
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.legend(loc="lower right", fontsize=8, frameon=False)
         ax.set_xlabel("decayed CPU usage (CPU-hours, ~7-day half-life, log scale)")
         ax.set_ylabel("decayed GPU usage (GPU-hours, ~7-day half-life, log scale)")
         ax.set_title("CPU usage vs. GPU usage (decayed)", loc="left", fontsize=12)
