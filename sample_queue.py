@@ -64,6 +64,33 @@ def expand_idx(idx_expr):
             out.append(int(part))
     return out
 
+def gpu_weighted_in_fairshare():
+    """Whether Slurm's fairshare priority currently accounts for GPUs held,
+    via PriorityWeightTRES (cluster-wide) or any partition's
+    TRESBillingWeights naming GRES/gpu with a nonzero weight. Queried live
+    off `scontrol` every tick (not cached), so render_readme.py's
+    recommendation about this drops out on its own the same cycle an admin
+    actually sets the weight."""
+    def has_nonzero_gpu_weight(field):
+        for part in field.split(","):
+            key, _, val = part.partition("=")
+            if key.strip().lower().startswith("gres/gpu"):
+                try:
+                    if float(val) > 0:
+                        return True
+                except ValueError:
+                    pass
+        return False
+
+    m = re.search(r"PriorityWeightTRES\s*=\s*(\S+)", run(["scontrol", "show", "config"]))
+    if m and m.group(1) != "(null)" and has_nonzero_gpu_weight(m.group(1)):
+        return True
+
+    for m in re.finditer(r"TRESBillingWeights=(\S+)", run(["scontrol", "show", "partition"])):
+        if has_nonzero_gpu_weight(m.group(1)):
+            return True
+    return False
+
 def gpu_bindings(scontrol_json):
     """Yields (job_id, node, gpu_idx) for every physical GPU every RUNNING
     job holds, parsed from `scontrol show job -dd --json`'s gres_detail
@@ -197,6 +224,9 @@ def main():
                 gpus_total += int(last) * nnodes
     print(json.dumps({"kind": "totals", "ts": ts, "cpus_total": cpus_total,
                        "gpus_total": gpus_total}))
+
+    print(json.dumps({"kind": "priority_config", "ts": ts,
+                       "gpu_weighted": gpu_weighted_in_fairshare()}))
 
 if __name__ == "__main__":
     main()

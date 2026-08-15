@@ -258,7 +258,7 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
     render() does for its charts) so it can be run once over all-time data
     and once over a windowed slice without the two runs interfering."""
     queue_rows = [r for r in queue_rows_all
-                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
+                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
     gpu_bind_rows = [r for r in queue_rows_all if r.get("kind") == "gpu_bind"]
 
@@ -400,7 +400,7 @@ def compute_open_times(queue_rows_all):
     all-time data (not the rolling window), so it keeps sharpening as more
     cron ticks land, independent of the 7-day dashboard window."""
     queue_rows = [r for r in queue_rows_all
-                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
+                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
     by_ts_totals = {r["ts"]: r for r in totals_rows}
     latest_totals = totals_rows[-1] if totals_rows else {"gpus_total": 0}
@@ -456,10 +456,15 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     cpu_util_rows = [r for r in cpu_util_rows_all if in_window(r)]
     queue_rows_all = [r for r in queue_rows_all_unfiltered if in_window(r)]
     queue_rows = [r for r in queue_rows_all
-                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
+                  if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
     gpu_bind_rows = [r for r in queue_rows_all if r.get("kind") == "gpu_bind"]
     job_id_map_rows = [r for r in queue_rows_all if r.get("kind") == "job_id_map"]
+    priority_config_rows = [r for r in queue_rows_all if r.get("kind") == "priority_config"]
+    # Live, re-checked every cron tick (sample_queue.py queries scontrol
+    # directly) - not cached, so the recommendation below disappears the
+    # same cycle someone actually sets the weight.
+    gpu_weighted_now = bool(priority_config_rows and priority_config_rows[-1]["gpu_weighted"])
 
     if not gpu_rows and not queue_rows:
         lines = ["# hopper_monitor", "",
@@ -896,9 +901,13 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         lines.append(f"One point per user per snapshot (n={len(decay_points)}), usage "
                      "decayed on Slurm's ~7-day fairshare half-life.")
         lines.append("")
-        lines.append("**GPU usage doesn't count toward priority on this cluster** "
-                     "(`TRESBillingWeights`/`PriorityWeightTRES` unset) - watch the "
-                     "**upper-left**: low CPU usage (high priority) with high GPU usage.")
+        if gpu_weighted_now:
+            lines.append("GPU usage is weighted into fairshare priority on this cluster "
+                         "(`TRESBillingWeights`/`PriorityWeightTRES` set).")
+        else:
+            lines.append("**GPU usage doesn't count toward priority on this cluster** "
+                         "(`TRESBillingWeights`/`PriorityWeightTRES` unset) - watch the "
+                         "**upper-left**: low CPU usage (high priority) with high GPU usage.")
         lines.append("")
 
     if live and archive_links:
@@ -911,49 +920,46 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         lines.append("")
 
     if live:
-        lines.append("## Recommendations")
-        lines.append("")
-        lines.append("1. **Weight GPU usage in fairshare.** `TRESBillingWeights` and "
-                     "`PriorityWeightTRES` are both unset right now, so Slurm's fairshare "
-                     "score only sees CPU-seconds - a job holding 4 idle L40S GPUs costs "
-                     "nothing in priority as long as it isn't also holding CPUs. That's the "
-                     "exact failure mode the scatter above is built to catch (upper-left: low "
-                     "CPU usage, high GPU usage). Fix: "
-                     "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` "
-                     "(or set `PriorityWeightTRES` cluster-wide), then `scontrol reconfigure` - "
-                     "a full `slurmctld` restart also works but drops in-flight priority state. "
-                     "A reasonable starting point for `<weight>` is the CPUs-per-GPU ratio on a "
-                     "GPU node (128 CPUs / 4 GPUs = 32), so one GPU costs as much fairshare as "
-                     f"the CPU share it displaces; tune from there against this week's headline "
-                     f"numbers ({headline_week['pct_gpu_alloc']:.1f}% allocated, "
-                     f"{headline_week['pct_util_when_alloc']:.1f}% utilized when allocated, over "
-                     f"the last {ROLLING_WINDOW_DAYS} days). The weight value itself is "
-                     "a policy call - loop in whoever owns cluster allocation policy before "
-                     "changing it.")
-        lines.append("")
+        recs = []
+        # Live, re-checked every cron tick (sample_queue.py queries scontrol
+        # directly, not cached) - this recommendation disappears on its own
+        # the same 30-minute cycle someone actually sets the weight.
+        if not gpu_weighted_now:
+            recs.append(
+                "**Weight GPU usage in fairshare.** `TRESBillingWeights`/`PriorityWeightTRES` "
+                "are unset, so idle GPUs cost nothing in priority - the failure mode the scatter "
+                "above flags (upper-left: low CPU usage, high GPU usage). Fix: "
+                "`scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` "
+                "then `scontrol reconfigure`. Start `<weight>` near the CPUs-per-GPU ratio "
+                f"(128/4=32) and tune against this week's numbers "
+                f"({headline_week['pct_gpu_alloc']:.1f}% allocated, "
+                f"{headline_week['pct_util_when_alloc']:.1f}% utilized when allocated) - "
+                "a policy call, so loop in whoever owns cluster allocation."
+            )
         worst_offender = headline_week["worst_offender"]
-        esc_line = ("2. **Escalate on sustained low utilization** (see table and scatter above). ")
+        esc_line = "**Escalate on sustained low utilization** (see table and scatter above)."
         if worst_offender:
+            idle_hours = worst_offender["gpu_hours"] * (1 - worst_offender["util_pct"] / 100)
             esc_line += (
-                f"Right now the clearest candidate is `{worst_offender['user']}` in "
-                f"`{worst_offender['lab']}`: {worst_offender['gpu_hours']:.1f} GPU-hours "
-                f"allocated at {worst_offender['util_pct']:.0f}% average utilization, i.e. "
-                f"roughly {worst_offender['gpu_hours'] * (1 - worst_offender['util_pct'] / 100):.0f} "
-                "GPU-hours that sat idle instead of going to someone in the queue. ")
+                f" Current top candidate: `{worst_offender['user']}` in "
+                f"`{worst_offender['lab']}` - {worst_offender['gpu_hours']:.1f} GPU-hours at "
+                f"{worst_offender['util_pct']:.0f}% utilization (~{idle_hours:.0f} idle)."
+            )
         esc_line += (
-            "Turning that into an automated escalation needs two decisions made up front: a "
-            "utilization threshold (something like under 20% mean utilization over at least "
-            f"{headline_week['escalation_min_gpu_hours']:.0f} allocated GPU-hours is a defensible starting bar - "
-            "loose enough to skip short debugging runs, tight enough to catch parked "
-            "allocations) and a grace period (how many consecutive low-utilization snapshots "
-            "before it counts as \"sustained\" rather than a momentary lull between batches). "
-            "Once those are set, the mechanism can be either soft (a bot that reads "
-            "`data/gpu_samples.jsonl` and reminds the user/lab by email or Slack) or hard (a "
-            "Slurm-side QOS penalty, e.g. `sacctmgr modify qos <qos> set Priority-=<n>`, applied "
-            "after N consecutive offending snapshots). Neither exists yet - today the table and "
-            "scatter above are a read-only signal, not an enforced policy.")
-        lines.append(esc_line)
-        lines.append("")
+            " Needs a utilization threshold (e.g. <20% mean over "
+            f"{headline_week['escalation_min_gpu_hours']:.0f}+ GPU-hours) and a grace period, "
+            "then either a soft nudge (Slack/email) or a hard QOS penalty "
+            "(`sacctmgr modify qos ... set Priority-=<n>`). Neither exists yet - this is "
+            "read-only signal, not enforced policy."
+        )
+        recs.append(esc_line)
+
+        if recs:
+            lines.append("## Recommendations")
+            lines.append("")
+            for i, rec in enumerate(recs, 1):
+                lines.append(f"{i}. {rec}")
+            lines.append("")
 
     readme_path.write_text("\n".join(lines) + "\n")
 
@@ -963,7 +969,7 @@ def main():
     cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
     queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
     queue_rows_only = [r for r in queue_rows_all
-                        if r.get("kind") not in ("totals", "gpu_bind", "job_id_map")]
+                        if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
 
     if not gpu_rows and not queue_rows_only:
         (DIR / "README.md").write_text(
