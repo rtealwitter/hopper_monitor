@@ -357,22 +357,26 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
     table_rows = []
     for key in table_keys:
         user, lab = key
+        gh = gpu_hours.get(key, 0.0)
+        util_pct = stats.mean(util_by_user[key]) if util_by_user.get(key) else None
         table_rows.append({
             "lab": lab, "user": user,
-            "gpu_hours": gpu_hours.get(key, 0.0),
+            "gpu_hours": gh,
             "cpu_hours": cpu_hours.get(key, 0.0),
-            "util_pct": stats.mean(util_by_user[key]) if util_by_user.get(key) else None,
+            "util_pct": util_pct,
+            "idle_gpu_hours": gh * (1 - util_pct / 100) if util_pct is not None else None,
         })
     table_rows.sort(key=lambda r: (-r["gpu_hours"]))
 
-    # ---- worst-case escalation candidate: biggest allocation sitting on the
-    # lowest utilization, gated on a minimum GPU-hour floor so a user with a
-    # couple of idle hours doesn't outrank someone hoarding hundreds. ----
+    # ---- worst-case escalation candidate: most idle GPU-hours sitting
+    # allocated (gpu_hours * (1 - util)), gated on a minimum GPU-hour floor
+    # so a short debug job idling at 0% doesn't outrank someone hoarding
+    # hundreds of hours at moderate utilization. ----
     escalation_min_gpu_hours = 50.0
     escalation_candidates = [r for r in table_rows
-                              if r["util_pct"] is not None
+                              if r["idle_gpu_hours"] is not None
                               and r["gpu_hours"] >= escalation_min_gpu_hours]
-    worst_offender = (min(escalation_candidates, key=lambda r: r["util_pct"])
+    worst_offender = (max(escalation_candidates, key=lambda r: r["idle_gpu_hours"])
                        if escalation_candidates else None)
 
     all_labs = {r["lab"] for r in gpu_dedup if r.get("lab")} | \
@@ -939,11 +943,12 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         worst_offender = headline_week["worst_offender"]
         esc_line = "**Escalate on sustained low utilization** (see table and scatter above)."
         if worst_offender:
-            idle_hours = worst_offender["gpu_hours"] * (1 - worst_offender["util_pct"] / 100)
             esc_line += (
-                f" Current top candidate: `{worst_offender['user']}` in "
-                f"`{worst_offender['lab']}` - {worst_offender['gpu_hours']:.1f} GPU-hours at "
-                f"{worst_offender['util_pct']:.0f}% utilization (~{idle_hours:.0f} idle)."
+                f" Current top candidate (most idle GPU-hours over the last "
+                f"{ROLLING_WINDOW_DAYS}d): `{worst_offender['user']}` in "
+                f"`{worst_offender['lab']}` - {worst_offender['idle_gpu_hours']:.0f} idle of "
+                f"{worst_offender['gpu_hours']:.1f} GPU-hours allocated "
+                f"({worst_offender['util_pct']:.0f}% utilization)."
             )
         esc_line += (
             " Needs a utilization threshold (e.g. <20% mean over "
