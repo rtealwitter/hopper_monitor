@@ -656,8 +656,10 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         gpu_vals = [p[1] for p in decay_points]
         fig, ax = plt.subplots(figsize=(7.5, 6))
         ax.scatter(cpu_vals, gpu_vals, color=INK, alpha=0.12, s=26, linewidth=0)
-        ax.set_xlabel("decayed CPU usage (CPU-hours, ~7-day half-life)")
-        ax.set_ylabel("decayed GPU usage (GPU-hours, ~7-day half-life)")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("decayed CPU usage (CPU-hours, ~7-day half-life, log scale)")
+        ax.set_ylabel("decayed GPU usage (GPU-hours, ~7-day half-life, log scale)")
         ax.set_title("CPU usage vs. GPU usage (decayed)", loc="left", fontsize=12)
         ax.text(0.02, 0.97, "low CPU usage (→ high priority),\nhigh GPU usage",
                 transform=ax.transAxes, ha="left", va="top", fontsize=8,
