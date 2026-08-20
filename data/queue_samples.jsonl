@@ -94373,3 +94373,37 @@
 {"kind": "job_id_map", "ts": "2026-08-20T10:00:02-07:00", "raw_id": "279783", "job_id": "279783"}
 {"kind": "totals", "ts": "2026-08-20T10:00:02-07:00", "cpus_total": 2176, "gpus_total": 60}
 {"kind": "priority_config", "ts": "2026-08-20T10:00:02-07:00", "gpu_weighted": false}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_[34-45%8]", "user": "user-554c620c", "lab": "witter-lab", "state": "PENDING", "cpus": 16, "gpus": 0, "node": null, "wait_seconds": 32123, "reason": "JobArrayTaskLimit", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279735", "user": "user-554c620c", "lab": "witter-lab", "state": "PENDING", "cpus": 8, "gpus": 0, "node": null, "wait_seconds": 32123, "reason": "Dependency", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "271332", "user": "user-3cfc41a3", "lab": "ibarragarciapadilla-lab", "state": "PENDING", "cpus": 1, "gpus": 0, "node": null, "wait_seconds": 416689, "reason": "Dependency", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "271331", "user": "user-3cfc41a3", "lab": "ibarragarciapadilla-lab", "state": "PENDING", "cpus": 1, "gpus": 0, "node": null, "wait_seconds": 416714, "reason": "Dependency", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "271322_91", "user": "user-3cfc41a3", "lab": "ibarragarciapadilla-lab", "state": "RUNNING", "cpus": 15, "gpus": 0, "node": "himem01", "wait_seconds": 323548, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "271322_84", "user": "user-3cfc41a3", "lab": "ibarragarciapadilla-lab", "state": "RUNNING", "cpus": 15, "gpus": 0, "node": "gpu01", "wait_seconds": 288684, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279783", "user": "user-f5bf0d80", "lab": "witter-lab", "state": "RUNNING", "cpus": 8, "gpus": 1, "node": "gpu02", "wait_seconds": 0, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "278984", "user": "user-fedb5feb", "lab": "nerenberg-lab", "state": "RUNNING", "cpus": 1, "gpus": 1, "node": "gpu02", "wait_seconds": 0, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_33", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu02", "wait_seconds": 32049, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_32", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu03", "wait_seconds": 31059, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_31", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu02", "wait_seconds": 30631, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_30", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu02", "wait_seconds": 27243, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_3", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu03", "wait_seconds": 487, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_0", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu01", "wait_seconds": 486, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_1", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu01", "wait_seconds": 486, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279734_2", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 16, "gpus": 0, "node": "gpu01", "wait_seconds": 486, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-20T10:30:01-07:00", "job_id": "279778", "user": "user-b89a87ef", "lab": "gillen-lab", "state": "RUNNING", "cpus": 64, "gpus": 0, "node": "gpu02", "wait_seconds": 0, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"kind": "gpu_bind", "ts": "2026-08-20T10:30:01-07:00", "job_id": "278984", "node": "gpu02", "gpu_idx": 0}
+{"kind": "gpu_bind", "ts": "2026-08-20T10:30:01-07:00", "job_id": "279783", "node": "gpu02", "gpu_idx": 1}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "278787", "job_id": "271322_84"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "278833", "job_id": "271322_91"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "278984", "job_id": "278984"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279736", "job_id": "279734_0"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279737", "job_id": "279734_1"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279738", "job_id": "279734_2"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279739", "job_id": "279734_3"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279778", "job_id": "279778"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279782", "job_id": "279734_30"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279786", "job_id": "279734_31"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279783", "job_id": "279783"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279787", "job_id": "279734_32"}
+{"kind": "job_id_map", "ts": "2026-08-20T10:30:01-07:00", "raw_id": "279788", "job_id": "279734_33"}
+{"kind": "totals", "ts": "2026-08-20T10:30:01-07:00", "cpus_total": 2176, "gpus_total": 60}
+{"kind": "priority_config", "ts": "2026-08-20T10:30:01-07:00", "gpu_weighted": false}
