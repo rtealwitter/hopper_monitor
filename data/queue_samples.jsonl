@@ -109029,3 +109029,17 @@
 {"kind": "job_id_map", "ts": "2026-08-24T13:30:01-07:00", "raw_id": "286429", "job_id": "286429_15"}
 {"kind": "totals", "ts": "2026-08-24T13:30:01-07:00", "cpus_total": 2176, "gpus_total": 60}
 {"kind": "priority_config", "ts": "2026-08-24T13:30:01-07:00", "gpu_weighted": false}
+{"ts": "2026-08-24T14:00:01-07:00", "job_id": "286448_14", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 4, "gpus": 1, "node": "gpu09", "wait_seconds": 1684, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-24T14:00:01-07:00", "job_id": "286448_13", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 4, "gpus": 1, "node": "gpu07", "wait_seconds": 1663, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-24T14:00:01-07:00", "job_id": "286446_12", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 4, "gpus": 1, "node": "gpu08", "wait_seconds": 1669, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"ts": "2026-08-24T14:00:01-07:00", "job_id": "286446_3", "user": "user-554c620c", "lab": "witter-lab", "state": "RUNNING", "cpus": 4, "gpus": 1, "node": "gpu07", "wait_seconds": 1659, "reason": "None", "priority": null, "age": null, "fairshare": null, "jobsize": null}
+{"kind": "gpu_bind", "ts": "2026-08-24T14:00:01-07:00", "job_id": "286446_3", "node": "gpu07", "gpu_idx": 2}
+{"kind": "gpu_bind", "ts": "2026-08-24T14:00:01-07:00", "job_id": "286448_13", "node": "gpu07", "gpu_idx": 3}
+{"kind": "gpu_bind", "ts": "2026-08-24T14:00:01-07:00", "job_id": "286446_12", "node": "gpu08", "gpu_idx": 2}
+{"kind": "gpu_bind", "ts": "2026-08-24T14:00:01-07:00", "job_id": "286448_14", "node": "gpu09", "gpu_idx": 1}
+{"kind": "job_id_map", "ts": "2026-08-24T14:00:01-07:00", "raw_id": "286451", "job_id": "286446_3"}
+{"kind": "job_id_map", "ts": "2026-08-24T14:00:01-07:00", "raw_id": "286453", "job_id": "286448_13"}
+{"kind": "job_id_map", "ts": "2026-08-24T14:00:01-07:00", "raw_id": "286446", "job_id": "286446_12"}
+{"kind": "job_id_map", "ts": "2026-08-24T14:00:01-07:00", "raw_id": "286448", "job_id": "286448_14"}
+{"kind": "totals", "ts": "2026-08-24T14:00:01-07:00", "cpus_total": 2176, "gpus_total": 60}
+{"kind": "priority_config", "ts": "2026-08-24T14:00:01-07:00", "gpu_weighted": false}
