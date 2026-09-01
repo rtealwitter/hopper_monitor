@@ -25,7 +25,7 @@ def main():
 
     section = None
     gpus = {}       # index -> dict
-    procs = []      # list of (pid, mem)
+    procs = []      # list of (gpu_uuid_or_none, pid, mem)
     pidmap = {}     # pid -> (user, job, lab)
 
     for line in sys.stdin:
@@ -40,11 +40,19 @@ def main():
             continue
         if section == "gpu":
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) != 5:
+            # UUID is the exact process-to-device join key. Accept the legacy
+            # five-column format as well so saved fixtures/old callers fail
+            # soft during upgrades.
+            if len(parts) == 6:
+                idx, gpu_uuid, ugpu, umem, memused, memtot = parts
+            elif len(parts) == 5:
+                idx, ugpu, umem, memused, memtot = parts
+                gpu_uuid = None
+            else:
                 continue
-            idx, ugpu, umem, memused, memtot = parts
             try:
                 gpus[int(idx)] = {
+                    "gpu_uuid": gpu_uuid,
                     "util_gpu": float(ugpu), "util_mem": float(umem),
                     "mem_used": float(memused), "mem_tot": float(memtot),
                 }
@@ -52,11 +60,15 @@ def main():
                 continue
         elif section == "proc":
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) != 2:
+            if len(parts) == 3:
+                gpu_uuid, pid, mem = parts
+            elif len(parts) == 2:
+                pid, mem = parts
+                gpu_uuid = None
+            else:
                 continue
-            pid, mem = parts
             try:
-                procs.append((pid, float(mem)))
+                procs.append((gpu_uuid, pid, float(mem)))
             except ValueError:
                 continue
         elif section == "cgroup":
@@ -68,12 +80,19 @@ def main():
                 lab = parts[4] if len(parts) > 4 else "unknown"
                 pidmap[pid] = (user, job, lab)
 
-    # Assign each process to its closest-matching physical GPU by memory footprint.
+    # Join on NVIDIA's device UUID. The former memory-footprint heuristic sent
+    # every process of a symmetric tensor-parallel job to GPU 0 because all
+    # cards/processes used the same amount of memory. Keep that heuristic only
+    # as a compatibility fallback for legacy five/two-column input.
     gpu_users = {idx: [] for idx in gpus}
-    for pid, mem in procs:
+    uuid_to_idx = {g.get("gpu_uuid"): idx for idx, g in gpus.items()
+                   if g.get("gpu_uuid")}
+    for gpu_uuid, pid, mem in procs:
         if not gpus:
             continue
-        best_idx = min(gpus, key=lambda i: abs(gpus[i]["mem_used"] - mem))
+        best_idx = uuid_to_idx.get(gpu_uuid)
+        if best_idx is None:
+            best_idx = min(gpus, key=lambda i: abs(gpus[i]["mem_used"] - mem))
         user, job, lab = pidmap.get(pid, ("", "", ""))
         gpu_users[best_idx].append((user, job, lab))
 
@@ -81,10 +100,11 @@ def main():
         owners = gpu_users.get(idx, [])
         if owners:
             # one row per distinct (user, job) pair sharing this physical GPU
-            for user, job, lab in owners:
+            for user, job, lab in dict.fromkeys(owners):
                 uf = pseudonym(user, salt) if mode == "anon_users" else (user or None)
                 row = {
                     "ts": ts, "node": node, "gpu_idx": idx,
+                    "gpu_uuid": g.get("gpu_uuid"),
                     "util_gpu": g["util_gpu"], "util_mem": g["util_mem"],
                     "mem_used": g["mem_used"], "mem_tot": g["mem_tot"],
                     "user": uf, "lab": lab or None, "job": job or None,
@@ -94,6 +114,7 @@ def main():
         else:
             row = {
                 "ts": ts, "node": node, "gpu_idx": idx,
+                "gpu_uuid": g.get("gpu_uuid"),
                 "util_gpu": g["util_gpu"], "util_mem": g["util_mem"],
                 "mem_used": g["mem_used"], "mem_tot": g["mem_tot"],
                 "user": None, "lab": None, "job": None, "n_procs": 0,

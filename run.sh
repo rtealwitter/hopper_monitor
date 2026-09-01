@@ -31,9 +31,9 @@ fi
 for n in $GPU_NODES; do
   ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
     echo "--GPU--"
-    nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits
+    nvidia-smi --query-gpu=index,uuid,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits
     echo "--PROC--"
-    nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null
+    nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory --format=csv,noheader,nounits 2>/dev/null
     echo "--CGROUP--"
     for p in $(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null); do
       job=$(cat /proc/$p/cgroup 2>/dev/null | grep -oE "job_[0-9_]+" | head -1)

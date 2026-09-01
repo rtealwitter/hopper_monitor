@@ -147,6 +147,29 @@ def percentile(sorted_vals, p):
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
 
+def consume_idle_with_unattributed(series_by_lab, unattrib_y):
+    """Make unattributed busy capacity consume already-allocated idle space.
+
+    Allocation is known per lab even when a utilization reading cannot be
+    joined to its job. Without this reconciliation, the chart stacks that
+    reading on top of the allocation which already owns the card, allowing a
+    60-GPU cluster to appear to use 70+ GPUs. Unknown busy capacity is removed
+    proportionally from labs' idle bands; only utilization beyond all known
+    idle allocation can extend the stack above total allocation.
+    """
+    out = {lab: (list(util), list(idle))
+           for lab, (util, idle) in series_by_lab.items()}
+    for i, unattributed in enumerate(unattrib_y):
+        idle_total = sum(idle[i] for _, idle in out.values() if idle is not None)
+        if idle_total <= 0:
+            continue
+        remaining_fraction = max(0.0, idle_total - max(0.0, unattributed)) / idle_total
+        for _, idle in out.values():
+            if idle is not None:
+                idle[i] *= remaining_fraction
+    return out
+
+
 def warp_time_axis(ax, x_datetimes, ref, scale_hours=3.0):
     """Warp a datetime axis so distance-from-`ref` (typically "now") is
     log-scaled: recent samples spread out for a close-up view, older ones
@@ -597,6 +620,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     attributed_cpu_total = {t: sum(by_ts_lab_cpu_util[t].values()) for t in ts_sorted_cpu}
     unattrib_cpu_y = [max(0.0, by_ts_total_cpu_util.get(t, 0.0) - attributed_cpu_total[t])
                        for t in ts_sorted_cpu]
+    series_cpu = consume_idle_with_unattributed(series_cpu, unattrib_cpu_y)
     cap_cpu = [by_ts_totals.get(t, {}).get("cpus_total") or cpus_total for t in ts_sorted_cpu]
     usage_chart(assets_dir / "cpu_alloc.png", "CPU allocation over time (by lab)",
                 "CPUs", x_cpu, series_cpu, colors, shown,
@@ -622,6 +646,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         series_gpu[lab] = (util_list, idle_list)
     attributed_total = {t: sum(by_ts_lab_util[t].values()) for t in ts_sorted_gpu}
     unattrib_y = [max(0.0, by_ts_total_util[t] - attributed_total[t]) for t in ts_sorted_gpu]
+    series_gpu = consume_idle_with_unattributed(series_gpu, unattrib_y)
     cap_gpu = [by_ts_totals.get(t, {}).get("gpus_total") or gpus_total for t in ts_sorted_gpu]
 
     usage_chart(assets_dir / "gpu_alloc_util.png", "GPU allocation over time (by lab)",

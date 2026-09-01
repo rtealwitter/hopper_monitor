@@ -64,6 +64,60 @@ def expand_idx(idx_expr):
             out.append(int(part))
     return out
 
+def expand_nodelist(expr):
+    """Expand the numeric bracket forms Slurm uses in its JSON `nodes` field.
+
+    Hopper currently returns job_resources.allocated_nodes=null, so the
+    top-level value (for example ``gpu[01-03,07]``) is the authoritative
+    fallback. Recursive expansion also handles more than one bracket group.
+    """
+    if not expr:
+        return []
+    parts = []
+    depth = start = 0
+    for i, char in enumerate(expr):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(expr[start:i])
+            start = i + 1
+    parts.append(expr[start:])
+    if len(parts) > 1:
+        return [node for part in parts for node in expand_nodelist(part)]
+    m = re.search(r"\[([^]]+)\]", expr)
+    if not m:
+        return [expr]
+    prefix, suffix = expr[:m.start()], expr[m.end():]
+    expanded = []
+    for part in m.group(1).split(","):
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            if lo.isdigit() and hi.isdigit():
+                width = max(len(lo), len(hi))
+                choices = [str(i).zfill(width) for i in range(int(lo), int(hi) + 1)]
+            else:
+                choices = [part]
+        else:
+            choices = [part]
+        for choice in choices:
+            expanded.extend(expand_nodelist(prefix + choice + suffix))
+    return expanded
+
+
+def display_job_id(job):
+    """Return the identifier format emitted by squeue for this job record."""
+    array_task_id = job.get("array_task_id") or {}
+    if array_task_id.get("set"):
+        return f"{job['array_job_id']['number']}_{array_task_id['number']}"
+    het_job_id = job.get("het_job_id") or {}
+    het_job_offset = job.get("het_job_offset") or {}
+    if het_job_id.get("set") and het_job_id.get("number"):
+        return f"{het_job_id['number']}+{het_job_offset.get('number', 0)}"
+    return str(job["job_id"])
+
+
 def gpu_weighted_in_fairshare():
     """Whether Slurm's fairshare priority currently accounts for GPUs held,
     via PriorityWeightTRES (cluster-wide) or any partition's
@@ -94,9 +148,10 @@ def gpu_weighted_in_fairshare():
 def gpu_bindings(scontrol_json):
     """Yields (job_id, node, gpu_idx) for every physical GPU every RUNNING
     job holds, parsed from `scontrol show job -dd --json`'s gres_detail
-    (one entry per node, e.g. "gpu:l40s:2(IDX:0-1)"), zipped against
-    job_resources.allocated_nodes (same order). job_id matches the format
-    squeue/sprio use for array tasks ("<array_job_id>_<array_task_id>")."""
+    (one entry per node, e.g. "gpu:l40s:2(IDX:0-1)"). Node names come from
+    job_resources.allocated_nodes on older Slurm JSON or the top-level nodes
+    hostlist on current Hopper. job_id matches squeue/sprio's array and
+    heterogeneous-component formats."""
     try:
         jobs = json.loads(scontrol_json).get("jobs", []) if scontrol_json.strip() else []
     except json.JSONDecodeError:
@@ -105,16 +160,20 @@ def gpu_bindings(scontrol_json):
         if "RUNNING" not in (j.get("job_state") or []):
             continue
         gres_detail = j.get("gres_detail") or []
-        nodes = (j.get("job_resources") or {}).get("allocated_nodes") or []
+        nodes_raw = (j.get("job_resources") or {}).get("allocated_nodes") or []
+        nodes = []
+        if isinstance(nodes_raw, list):
+            nodes = [n.get("nodename") if isinstance(n, dict) else str(n)
+                     for n in nodes_raw]
+        elif isinstance(nodes_raw, dict):
+            nodes = [n.get("nodename") if isinstance(n, dict) else str(n)
+                     for n in nodes_raw.values()]
+        if not nodes:
+            nodes = expand_nodelist(j.get("nodes") or j.get("batch_host") or "")
         if not gres_detail or len(gres_detail) != len(nodes):
             continue
-        array_task_id = j.get("array_task_id") or {}
-        if array_task_id.get("set"):
-            job_id = f"{j['array_job_id']['number']}_{array_task_id['number']}"
-        else:
-            job_id = str(j["job_id"])
-        for node_info, gres in zip(nodes, gres_detail):
-            node = node_info.get("nodename")
+        job_id = display_job_id(j)
+        for node, gres in zip(nodes, gres_detail):
             m = re.search(r"IDX:([0-9,\-]+)", gres)
             if not node or not m:
                 continue
@@ -135,12 +194,7 @@ def job_id_map(scontrol_json):
     for j in jobs:
         if "RUNNING" not in (j.get("job_state") or []):
             continue
-        array_task_id = j.get("array_task_id") or {}
-        if array_task_id.get("set"):
-            display_id = f"{j['array_job_id']['number']}_{array_task_id['number']}"
-        else:
-            display_id = str(j["job_id"])
-        yield str(j["job_id"]), display_id
+        yield str(j["job_id"]), display_job_id(j)
 
 def main():
     ts, mode, salt = sys.argv[1], sys.argv[2], sys.argv[3]
