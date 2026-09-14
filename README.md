@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-09-14T16:00:10-07:00
-Samples: 1899 queue snapshots total (336 in the last 7 days), 1733 GPU snapshots total (336 in the last 7 days)
+Last updated: 2026-09-14T16:30:14-07:00
+Samples: 1900 queue snapshots total (336 in the last 7 days), 1734 GPU snapshots total (336 in the last 7 days)
 
 ## Resources
 
@@ -18,7 +18,7 @@ Samples: 1899 queue snapshots total (336 in the last 7 days), 1733 GPU snapshots
 
 - **53.4%** (last 7 days) vs **38.8%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
 - **58.9%** (last 7 days) vs **53.8%** (all time) average `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **95.7%** (last 7 days) vs **85.4%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
+- **95.7%** (last 7 days) vs **85.3%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Most open times
 
@@ -29,9 +29,9 @@ Based on 41 days of history so far, `hopper.cluster` has historically been most 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>3091.0</td><td align='right'>14589.0</td><td align='right'>82%</td><td align='right'>68%</td></tr>
-<tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1991.5</td><td align='right'>5952.5</td><td align='right'>24%</td><td align='right'>27%</td></tr>
-<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>230.5</td><td align='right'>246.5</td><td align='right'>70%</td><td align='right'>67%</td></tr>
-<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>56.0</td><td align='right'>153.0</td><td align='right'>63%</td><td align='right'>58%</td></tr>
+<tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1991.5</td><td align='right'>5960.0</td><td align='right'>24%</td><td align='right'>27%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>232.5</td><td align='right'>248.5</td><td align='right'>70%</td><td align='right'>67%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>56.0</td><td align='right'>154.0</td><td align='right'>64%</td><td align='right'>58%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>4.5</td><td align='right'>1028.0</td><td align='right'>23%</td><td align='right'>7%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-f5bf0d80</td><td align='right'>2.0</td><td align='right'>65.0</td><td align='right'>59%</td><td align='right'>35%</td></tr>
 <tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>1.5</td><td align='right'>1.5</td><td align='right'>59%</td><td align='right'>59%</td></tr>
@@ -40,22 +40,22 @@ Based on 41 days of history so far, `hopper.cluster` has historically been most 
 <tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-ac8c851f</td><td align='right'>0.5</td><td align='right'>5.5</td><td align='right'>98%</td><td align='right'>81%</td></tr>
 <tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>0.0</td><td align='right'>40.0</td><td align='right'>—</td><td align='right'>71%</td></tr>
 <tr style='background-color:#fcf0d8'><td>gillen-lab</td><td>user-d21e03f5</td><td align='right'>0.0</td><td align='right'>5.0</td><td align='right'>—</td><td align='right'>72%</td></tr>
+<tr style='background-color:#fbebf1'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#fbebf1'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-87cc74d1</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fbebf1'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fae3e3'><td>ritz-lab</td><td>user-37f252dd</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#fae3e3'><td>ritz-lab</td><td>user-4a771e4a</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#fbebf1'><td>ibarragarciapadilla-lab</td><td>user-dad71a72</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#dfeaf8'><td>batta-lab</td><td>user-58bad794</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fae3e3'><td>ritz-lab</td><td>user-37f252dd</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#d8ecd8'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-87cc74d1</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-09-07 16:00 to 2026-09-14 16:00** (PDT).
+Charts below cover the trailing 7 days: **2026-09-07 16:30 to 2026-09-14 16:30** (PDT).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
@@ -63,7 +63,7 @@ Charts below cover the trailing 7 days: **2026-09-07 16:00 to 2026-09-14 16:00**
 
 Solid = utilized by lab, hatched = allocated but idle, gray = usage not traceable to a lab, dashed line = cluster capacity.
 
-Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **985** readings the former missed.
+Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **983** readings the former missed.
 
 ## Queue
 
