@@ -13,6 +13,7 @@ repo's minimalism.
 import json
 import math
 import statistics as stats
+from data_store import sample_files
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -60,17 +61,16 @@ plt.rcParams.update({
 
 def load_jsonl(path):
     rows = []
-    if not path.exists():
-        return rows
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    for part in sample_files(path):
+        with open(part) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
     return rows
 
 
