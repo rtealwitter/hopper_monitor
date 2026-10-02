@@ -9,7 +9,7 @@ Samples: 338 queue snapshots, 334 GPU snapshots
 ## Headline
 
 - **51.4%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **53.6%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **53.6%** average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
 - **81.4%** average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Per lab / per user
@@ -22,10 +22,10 @@ Samples: 338 queue snapshots, 334 GPU snapshots
 <tr style='background-color:#fbebf1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>22.5</td><td align='right'>65%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-f5bf0d80</td><td align='right'>15.0</td><td align='right'>50%</td></tr>
 <tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-d21e03f5</td><td align='right'>1.5</td><td align='right'>31%</td></tr>
-<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#d8ecd8'><td>ritz-lab</td><td>user-37f252dd</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ritz-lab</td><td>user-37f252dd</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time

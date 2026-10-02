@@ -78,7 +78,8 @@ def main():
                 user = parts[2] if len(parts) > 2 else ""
                 job = parts[3] if len(parts) > 3 else ""
                 lab = parts[4] if len(parts) > 4 else "unknown"
-                pidmap[pid] = (user, job, lab)
+                pidmap[pid] = ("" if user == "-" else user,
+                               "" if job == "-" else job, lab)
 
     # Join on NVIDIA's device UUID. The former memory-footprint heuristic sent
     # every process of a symmetric tensor-parallel job to GPU 0 because all
@@ -91,6 +92,9 @@ def main():
         if not gpus:
             continue
         best_idx = uuid_to_idx.get(gpu_uuid)
+        if best_idx is None and gpu_uuid:
+            # An explicit UUID cannot safely be reassigned to another card.
+            continue
         if best_idx is None:
             best_idx = min(gpus, key=lambda i: abs(gpus[i]["mem_used"] - mem))
         user, job, lab = pidmap.get(pid, ("", "", ""))

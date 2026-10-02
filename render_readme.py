@@ -282,6 +282,7 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
     Self-contained (redoes the same dedupe/backfill/CPU-equivalent work
     render() does for its charts) so it can be run once over all-time data
     and once over a windowed slice without the two runs interfering."""
+    queue_rows_all = normalize_gpu_allocations(queue_rows_all)
     queue_rows = [r for r in queue_rows_all
                   if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
@@ -345,7 +346,8 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
         gpus_alloc_by_ts[r["ts"]] += r["gpus"]
 
     pct_gpu_alloc_samples = []
-    for ts, g in gpus_alloc_by_ts.items():
+    for ts in set(by_ts_totals) | {r["ts"] for r in queue_rows}:
+        g = gpus_alloc_by_ts.get(ts, 0)
         tot = by_ts_totals.get(ts, {}).get("gpus_total") or gpus_total
         pct_gpu_alloc_samples.append(100 * g / tot)
     pct_gpu_alloc = stats.mean(pct_gpu_alloc_samples) if pct_gpu_alloc_samples else 0.0
@@ -362,7 +364,7 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
             cpu_util_fractions.append(100 * min(1.0, equiv / cores))
     pct_cpu_util_when_alloc = stats.mean(cpu_util_fractions) if cpu_util_fractions else 0.0
 
-    distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows})
+    distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows_all})
     intervals = interval_hours(distinct_ts)
 
     gpu_hours = defaultdict(float)
@@ -374,9 +376,16 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
         cpu_hours[key] += r["cpus"] * h
 
     util_by_user = defaultdict(list)
+    measured_gpu_hours = defaultdict(float)
+    measured_idle_hours = defaultdict(float)
     for r in gpu_dedup:
         if r.get("user"):
-            util_by_user[(r["user"], r.get("lab") or "unknown")].append(r["util_gpu"])
+            key = (r["user"], r.get("lab") or "unknown")
+            util_by_user[key].append(r["util_gpu"])
+            if r.get("job"):
+                h = intervals.get(parse_ts(r["ts"]), 0.5)
+                measured_gpu_hours[key] += h
+                measured_idle_hours[key] += h * (1 - r["util_gpu"] / 100)
 
     table_keys = set(gpu_hours) | set(cpu_hours) | set(util_by_user)
     table_rows = []
@@ -389,18 +398,19 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
             "gpu_hours": gh,
             "cpu_hours": cpu_hours.get(key, 0.0),
             "util_pct": util_pct,
-            "idle_gpu_hours": gh * (1 - util_pct / 100) if util_pct is not None else None,
+            "measured_gpu_hours": measured_gpu_hours.get(key, 0.0),
+            "idle_gpu_hours": (measured_idle_hours[key]
+                               if measured_gpu_hours.get(key) else None),
         })
     table_rows.sort(key=lambda r: (-r["gpu_hours"]))
 
-    # ---- worst-case escalation candidate: most idle GPU-hours sitting
-    # allocated (gpu_hours * (1 - util)), gated on a minimum GPU-hour floor
-    # so a short debug job idling at 0% doesn't outrank someone hoarding
-    # hundreds of hours at moderate utilization. ----
+    # Only observed allocated readings support idle-time estimates. Never
+    # extrapolate sparse telemetry over the entire allocation: missing
+    # samples (especially historical multi-node gaps) are unknown, not idle.
     escalation_min_gpu_hours = 50.0
     escalation_candidates = [r for r in table_rows
                               if r["idle_gpu_hours"] is not None
-                              and r["gpu_hours"] >= escalation_min_gpu_hours]
+                              and r["measured_gpu_hours"] >= escalation_min_gpu_hours]
     worst_offender = (max(escalation_candidates, key=lambda r: r["idle_gpu_hours"])
                        if escalation_candidates else None)
 
@@ -428,6 +438,7 @@ def compute_open_times(queue_rows_all):
     lowest average GPU allocation - i.e. been most 'open'. Always run over
     all-time data (not the rolling window), so it keeps sharpening as more
     cron ticks land, independent of the 7-day dashboard window."""
+    queue_rows_all = normalize_gpu_allocations(queue_rows_all)
     queue_rows = [r for r in queue_rows_all
                   if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
@@ -440,7 +451,7 @@ def compute_open_times(queue_rows_all):
         if r["state"] == "RUNNING":
             gpus_alloc_by_ts[r["ts"]] += r["gpus"]
 
-    distinct_ts = sorted({r["ts"] for r in queue_rows})
+    distinct_ts = sorted({r["ts"] for r in queue_rows_all}, key=parse_ts)
     if not distinct_ts:
         return None
 
@@ -472,6 +483,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     [window_start, window_end). Used both for the live rolling-7-day
     dashboard (assets_dir=assets/, img_prefix="assets/") and for a single
     archived calendar week (assets_dir=readme_path.parent, img_prefix="")."""
+    queue_rows_all_unfiltered = normalize_gpu_allocations(queue_rows_all_unfiltered)
     assets_dir.mkdir(parents=True, exist_ok=True)
 
     # Warping toward "now" only makes sense for the live rolling dashboard -
@@ -495,7 +507,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     # same cycle someone actually sets the weight.
     gpu_weighted_now = bool(priority_config_rows and priority_config_rows[-1]["gpu_weighted"])
 
-    if not gpu_rows and not queue_rows:
+    if not gpu_rows and not queue_rows_all:
         lines = ["# hopper_monitor", "",
                   f"No samples between {window_start:%Y-%m-%d} and "
                   f"{window_end:%Y-%m-%d}."]
@@ -593,7 +605,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
 
     running = [r for r in queue_rows if r["state"] == "RUNNING"]
 
-    distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows})
+    distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows_all})
     intervals = interval_hours(distinct_ts)
 
     # ================= chart 1 & 2: CPU / GPU allocation over time, by lab -
@@ -609,7 +621,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         alloc_by_ts_lab_gpu[r["ts"]][lab] += r["gpus"]
         alloc_by_ts_lab_cpu[r["ts"]][lab] += r["cpus"]
 
-    ts_sorted_cpu = sorted({r["ts"] for r in running} | set(by_ts_total_cpu_util), key=parse_ts)
+    ts_sorted_cpu = sorted({r["ts"] for r in queue_rows_all} | set(by_ts_total_cpu_util), key=parse_ts)
     x_cpu = [parse_ts(t) for t in ts_sorted_cpu]
     labs_cpu = {lab for v in alloc_by_ts_lab_cpu.values() for lab in v} | \
                {lab for v in by_ts_lab_cpu_util.values() for lab in v}
@@ -636,7 +648,8 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         if r.get("job") and r.get("lab"):
             by_ts_lab_util[r["ts"]][r["lab"]] += r["util_gpu"] / 100.0
 
-    ts_sorted_gpu = sorted({r["ts"] for r in gpu_dedup}, key=parse_ts)
+    ts_sorted_gpu = sorted({r["ts"] for r in gpu_dedup} |
+                           {r["ts"] for r in queue_rows_all}, key=parse_ts)
     x_gpu = [parse_ts(t) for t in ts_sorted_gpu]
     labs_gpu = {lab for v in by_ts_lab_util.values() for lab in v} | \
                {lab for v in alloc_by_ts_lab_gpu.values() for lab in v}
@@ -668,8 +681,8 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     by_ts_wait = defaultdict(list)
     for r in pending:
         by_ts_wait[r["ts"]].append(r["wait_seconds"] / 3600.0)
-    if queue_rows:
-        ts_sorted4 = sorted({r["ts"] for r in queue_rows}, key=parse_ts)
+    if queue_rows_all:
+        ts_sorted4 = sorted({r["ts"] for r in queue_rows_all}, key=parse_ts)
         x4 = [parse_ts(t) for t in ts_sorted4]
         med = [percentile(sorted(by_ts_wait[t]), 50) if t in by_ts_wait else 0.0
                for t in ts_sorted4]
@@ -770,7 +783,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
                       f"vs **{h_all['pct_gpu_alloc']:.1f}%** (all time) of the cluster's "
                       f"{h_all['gpus_total']} GPUs allocated, averaged across samples")
         block.append(f"- **{h_week['pct_util_when_alloc']:.1f}%** (last {ROLLING_WINDOW_DAYS} days) "
-                      f"vs **{h_all['pct_util_when_alloc']:.1f}%** (all time) average `nvidia-smi` "
+                      f"vs **{h_all['pct_util_when_alloc']:.1f}%** (all time) average observed `nvidia-smi` "
                       f"utilization *when* a GPU is allocated to a job")
         block.append(f"- **{h_week['pct_cpu_util_when_alloc']:.1f}%** (last {ROLLING_WINDOW_DAYS} days) "
                       f"vs **{h_all['pct_cpu_util_when_alloc']:.1f}%** (all time) average cgroup CPU "
@@ -782,7 +795,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         block = ["## Headline", ""]
         block.append(f"- **{h['pct_gpu_alloc']:.1f}%** of the cluster's {h['gpus_total']} GPUs "
                       f"allocated, averaged across all samples")
-        block.append(f"- **{h['pct_util_when_alloc']:.1f}%** average `nvidia-smi` utilization "
+        block.append(f"- **{h['pct_util_when_alloc']:.1f}%** average observed `nvidia-smi` utilization "
                       f"*when* a GPU is allocated to a job")
         block.append(f"- **{h['pct_cpu_util_when_alloc']:.1f}%** average cgroup CPU utilization "
                       f"*when* a CPU is allocated to a job")
@@ -975,10 +988,10 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         esc_line = "**Escalate on sustained low utilization** (see table and scatter above)."
         if worst_offender:
             esc_line += (
-                f" Current top candidate (most idle GPU-hours over the last "
+                f" Current top candidate (most measured idle GPU-hours over the last "
                 f"{ROLLING_WINDOW_DAYS}d): `{worst_offender['user']}` in "
                 f"`{worst_offender['lab']}` - {worst_offender['idle_gpu_hours']:.0f} idle of "
-                f"{worst_offender['gpu_hours']:.1f} GPU-hours allocated "
+                f"{worst_offender['measured_gpu_hours']:.1f} GPU-hours observed "
                 f"({worst_offender['util_pct']:.0f}% utilization)."
             )
         esc_line += (
@@ -1009,10 +1022,7 @@ def main():
     cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
     queue_rows_all = normalize_gpu_allocations(
         load_jsonl(DIR / "data" / "queue_samples.jsonl"))
-    queue_rows_only = [r for r in queue_rows_all
-                        if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
-
-    if not gpu_rows and not queue_rows_only:
+    if not gpu_rows and not queue_rows_all:
         (DIR / "README.md").write_text(
             "# hopper_monitor\n\nNo samples recorded yet - check back after "
             "the next 30-minute cron tick.\n"
@@ -1025,7 +1035,7 @@ def main():
     # One dated snapshot per fully-elapsed calendar week (Monday-Sunday).
     # Existing archives stay frozen unless explicitly refreshing accounting.
     all_ts = sorted({parse_ts(r["ts"]) for r in gpu_rows} |
-                     {parse_ts(r["ts"]) for r in queue_rows_only} |
+                     {parse_ts(r["ts"]) for r in queue_rows_all} |
                      {parse_ts(r["ts"]) for r in cpu_util_rows})
     if all_ts:
         week_start = monday_of(all_ts[0])

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from anon import pseudonym
 
 def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
+    return subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60).stdout
 
 def parse_gpus(gres_field):
     """Count GPU resources, excluding other comma-separated GRES types."""
@@ -209,11 +209,12 @@ def gpu_bindings(scontrol_json):
             continue
         job_id = display_job_id(j)
         for node, gres in zip(nodes, gres_detail):
-            m = re.search(r"IDX:([0-9,\-]+)", gres)
-            if not node or not m:
+            if not node:
                 continue
-            for idx in expand_idx(m.group(1)):
-                yield job_id, node, idx
+            # GRES may contain MPS/NIC indices as well as multiple GPU types.
+            for m in re.finditer(r"(?:^|,)gpu(?::[^:,()]+)?:\d+\(IDX:([0-9,\-]+)\)", gres):
+                for idx in expand_idx(m.group(1)):
+                    yield job_id, node, idx
 
 def job_id_map(scontrol_json):
     """Yields (raw_job_id, display_job_id) for every RUNNING job. The cgroup
@@ -312,10 +313,7 @@ def main():
         # %C is "alloc/idle/other/total" per the node-state group this line covers
         c_total = int(cpu_field.split("/")[-1])
         cpus_total += c_total
-        if "gpu" in gres:
-            last = gres.rsplit(":", 1)[-1]
-            if last.isdigit():
-                gpus_total += int(last) * nnodes
+        gpus_total += parse_gpus(gres) * nnodes
     print(json.dumps({"kind": "totals", "ts": ts, "cpus_total": cpus_total,
                        "gpus_total": gpus_total}))
 

@@ -9,7 +9,7 @@ Samples: 336 queue snapshots, 244 GPU snapshots
 ## Headline
 
 - **21.8%** of the cluster's 60 GPUs allocated, averaged across all samples
-- **53.0%** average `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **53.0%** average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
 - **87.2%** average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Per lab / per user
@@ -22,12 +22,12 @@ Samples: 336 queue snapshots, 244 GPU snapshots
 <tr style='background-color:#e3e1f1'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>17.0</td><td align='right'>39%</td></tr>
 <tr style='background-color:#d8ecd8'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>6.5</td><td align='right'>63%</td></tr>
 <tr style='background-color:#e3e1f1'><td>zhuang-lab</td><td>user-ac8c851f</td><td align='right'>1.5</td><td align='right'>48%</td></tr>
-<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#d8ecd8'><td>nerenberg-lab</td><td>user-87cc74d1</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fbebf1'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time

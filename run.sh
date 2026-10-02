@@ -17,6 +17,12 @@ flock -n 200 || { echo "[$(date -Iseconds)] previous run still in progress, skip
 TS=$(date -Iseconds)
 echo "[$TS] run start (mode=$MODE)" >> "$LOG"
 
+# Do not publish a partial or false-empty queue snapshot after a Slurm failure.
+STAGE=$(mktemp -d) || exit 1
+trap 'rm -rf "$STAGE"' EXIT
+python3 "$DIR/sample_queue.py" "$TS" "$MODE" "$SALT" > "$STAGE/queue.jsonl" 2>>"$LOG" \
+  || { echo "[$TS] queue sampling FAILED" >> "$LOG"; exit 1; }
+
 # Start another part after 32 MiB instead of growing a file indefinitely.
 GPU_DATA=$(python3 "$DIR/data_store.py" gpu_samples) || exit 1
 CPU_DATA=$(python3 "$DIR/data_store.py" cpu_samples) || exit 1
@@ -26,17 +32,18 @@ QUEUE_DATA=$(python3 "$DIR/data_store.py" queue_samples) || exit 1
 # Expand every allocated hostlist: a multi-node job has no separate rows
 # for its individual nodes. GPU-capable active nodes are sampled even when
 # the job requests GPUs per job/task instead of through squeue's %b field.
-ALL_NODES=$(squeue --state=RUNNING -a -h -o "%N" 2>>"$LOG" |
-  while IFS= read -r nodes; do scontrol show hostnames "$nodes"; done | sort -u)
+ALL_NODES=$(timeout 60s squeue --state=RUNNING -a -h -o "%N" 2>>"$LOG" |
+  while IFS= read -r nodes; do timeout 60s scontrol show hostnames "$nodes" || exit 1; done | sort -u) || exit 1
+GPU_CAPACITY=$(timeout 60s sinfo -N -a -h -o "%N|%G" 2>>"$LOG") || exit 1
 GPU_NODES=$(comm -12 <(printf '%s\n' "$ALL_NODES") \
-  <(sinfo -N -a -h -o "%N|%G" 2>>"$LOG" | awk -F'|' '$2 ~ /gpu:/ {print $1}' | sort -u))
+  <(printf '%s\n' "$GPU_CAPACITY" | awk -F'|' '$2 ~ /gpu:/ {print $1}' | sort -u))
 
 if [ -z "$GPU_NODES" ]; then
   echo "[$TS] no GPU jobs running cluster-wide right now" >> "$LOG"
 fi
 
 for n in $GPU_NODES; do
-  ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+  timeout 45s ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
     echo "--GPU--"
     nvidia-smi --query-gpu=index,uuid,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits
     echo "--PROC--"
@@ -46,9 +53,10 @@ for n in $GPU_NODES; do
       job=$(cat /proc/$p/cgroup 2>/dev/null | grep -oE "job_[0-9_]+" | head -1)
       user=$(ps -o user= -p "$p" 2>/dev/null | tr -d " ")
       lab=$(id -Gn "$user" 2>/dev/null | tr " " "\n" | grep -- "-lab$" | head -1)
-      echo "PIDMAP $p $user $job ${lab:-unknown}"
+      printf "PIDMAP %s %s %s %s\n" "$p" "${user:--}" "${job:--}" "${lab:-unknown}"
     done
-  ' 2>>"$LOG" | python3 "$DIR/sample_gpu.py" "$TS" "$n" "$MODE" "$SALT" >> "$GPU_DATA" 2>>"$LOG"
+  ' 2>>"$LOG" | python3 "$DIR/sample_gpu.py" "$TS" "$n" "$MODE" "$SALT" >> "$GPU_DATA" 2>>"$LOG" \
+    || echo "[$TS] GPU sample incomplete for $n" >> "$LOG"
 done
 
 # ---- CPU sampler: ssh to every node running ANY job (GPU or not - includes
@@ -57,18 +65,19 @@ done
 # as the GPU binding cross-reference below - just cat a file the kernel
 # already maintains. ----
 for n in $ALL_NODES; do
-  ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+  timeout 45s ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
     for d in /sys/fs/cgroup/system.slice/slurmstepd.scope/job_*/; do
       [ -d "$d" ] || continue
       job=$(basename "$d"); job=${job#job_}
       usage=$(awk "/^usage_usec/{print \$2}" "$d/cpu.stat" 2>/dev/null)
       [ -n "$usage" ] && echo "CPUJOB $job $usage"
     done
-  ' 2>>"$LOG" | python3 "$DIR/sample_cpu.py" "$TS" "$n" >> "$CPU_DATA" 2>>"$LOG"
+  ' 2>>"$LOG" | python3 "$DIR/sample_cpu.py" "$TS" "$n" >> "$CPU_DATA" 2>>"$LOG" \
+    || echo "[$TS] CPU sample incomplete for $n" >> "$LOG"
 done
 
 # ---- queue sampler: squeue + sprio + scontrol, straight from the login node, no ssh ----
-python3 "$DIR/sample_queue.py" "$TS" "$MODE" "$SALT" >> "$QUEUE_DATA" 2>>"$LOG"
+cat "$STAGE/queue.jsonl" >> "$QUEUE_DATA" || exit 1
 
 # ---- render README + charts on a compute node (never matplotlib on the login node) ----
 if sbatch --wait --partition=debug --time=5 --cpus-per-task=1 --mem=2G \
