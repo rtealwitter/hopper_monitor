@@ -3,6 +3,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import io
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,7 +13,8 @@ sys.path.insert(0, str(ROOT))
 from render_readme import consume_idle_with_unattributed
 from render_readme import load_jsonl
 from data_store import migrate, sample_path, sample_files
-from sample_queue import display_job_id, expand_nodelist, gpu_bindings
+from sample_queue import (display_job_id, expand_nodelist, gpu_bindings,
+                          normalize_gpu_allocations, parse_gpus, main as sample_queue)
 
 
 class SampleStorageTests(unittest.TestCase):
@@ -77,6 +80,64 @@ PIDMAP 102 alice job_7 witter-lab
 
 
 class SlurmBindingTests(unittest.TestCase):
+    def test_eight_node_allocation_has_32_physical_gpus(self):
+        job = {"job_id": 7, "job_state": ["RUNNING"],
+               "nodes": "gpu[08-15]",
+               "gres_detail": ["gpu:l40s:4(IDX:0-3)"] * 8}
+        bindings = list(gpu_bindings(json.dumps({"jobs": [job]})))
+        self.assertEqual(len(set(bindings)), 32)
+        self.assertEqual({node for _, node, _ in bindings},
+                         {f"gpu{i:02}" for i in range(8, 16)})
+
+    def test_sampler_emits_job_total_with_and_without_bindings(self):
+        job = {"job_id": 7, "job_state": ["RUNNING"],
+               "nodes": "gpu[08-15]",
+               "gres_detail": ["gpu:l40s:4(IDX:0-3)"] * 8}
+        for jobs in ([job], []):
+            def command(cmd):
+                if cmd[0] == "squeue":
+                    return "7|alice|RUNNING|32|gres/gpu:l40s:4|gpu[08-15]|N/A|N/A|None|8"
+                if cmd[:4] == ["scontrol", "show", "job", "-dd"]:
+                    return json.dumps({"jobs": jobs})
+                if cmd[0] == "sinfo":
+                    return "15|0/1920/0/1920|gpu:l40s:4"
+                return ""
+            output = io.StringIO()
+            with patch("sample_queue.run", side_effect=command), \
+                 patch("sys.argv", ["sample_queue.py", "ts", "named", "salt"]), \
+                 patch("sys.stdout", output):
+                sample_queue()
+            row = json.loads(output.getvalue().splitlines()[0])
+            self.assertEqual(row["gpus"], 32)
+            self.assertEqual(row["gpus_scope"], "job")
+
+    def test_legacy_correction_is_idempotent_and_keeps_raw_samples(self):
+        rows = [{"ts": "t", "job_id": "7", "state": "RUNNING",
+                 "gpus": 4, "node": "gpu[08-15]"},
+                {"ts": "t", "job_id": "8", "state": "RUNNING",
+                 "gpus": 1, "node": "gpu01"},
+                {"ts": "t", "job_id": "9", "state": "PENDING",
+                 "gpus": 1, "node": None}]
+        fixed = normalize_gpu_allocations(rows)
+        self.assertEqual([r["gpus"] for r in fixed], [32, 1, 1])
+        self.assertEqual(rows[0]["gpus"], 4)
+        self.assertEqual(normalize_gpu_allocations(fixed), fixed)
+        self.assertEqual(normalize_gpu_allocations(rows + rows), fixed)
+
+    def test_historical_bindings_override_uniform_node_assumption(self):
+        rows = [{"ts": "t", "job_id": "7", "gpus": 4, "node": "gpu[01-02]"}]
+        rows += [{"kind": "gpu_bind", "ts": "t", "job_id": "7",
+                  "node": node, "gpu_idx": idx}
+                 for node, idx in [("gpu01", 0), ("gpu02", 0), ("gpu02", 1)]]
+        rows.append(dict(rows[-1]))  # repeated readings are not extra devices
+        self.assertEqual(normalize_gpu_allocations(rows)[0]["gpus"], 3)
+
+    def test_mixed_gres_does_not_count_other_resources(self):
+        self.assertEqual(parse_gpus("gres/gpu:l40s:4,gres/mps:100"), 4)
+        self.assertEqual(parse_gpus("gpu:a100:2,gpu:l40s:4"), 6)
+        self.assertEqual(parse_gpus("gres/gpu:2"), 2)
+        self.assertEqual(parse_gpus("N/A"), 0)
+
     def test_current_hopper_json_uses_top_level_nodes(self):
         payload = {"jobs": [{
             "job_id": 290094,

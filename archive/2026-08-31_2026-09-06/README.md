@@ -22,12 +22,12 @@ Samples: 336 queue snapshots, 244 GPU snapshots
 <tr style='background-color:#e3e1f1'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>17.0</td><td align='right'>39%</td></tr>
 <tr style='background-color:#d8ecd8'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>6.5</td><td align='right'>63%</td></tr>
 <tr style='background-color:#e3e1f1'><td>zhuang-lab</td><td>user-ac8c851f</td><td align='right'>1.5</td><td align='right'>48%</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#d8ecd8'><td>nerenberg-lab</td><td>user-87cc74d1</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 <tr style='background-color:#fce8e0'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fbebf1'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#dfeaf8'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>nerenberg-lab</td><td>user-87cc74d1</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
@@ -38,9 +38,10 @@ Charts below cover this week: **2026-08-31 00:00 to 2026-09-07 00:00** (UTC-07:0
 
 ![GPU allocation over time](gpu_alloc_util.png)
 
-Solid = utilized by lab, hatched = allocated but idle, gray = usage not traceable to a lab, dashed line = cluster capacity.
+Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not traceable to a lab, dashed line = cluster capacity.
 
 Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **499** readings the former missed.
+Allocation counts include all nodes of each job, including corrected historical totals. Before October 2, 2026, utilization sampling could skip nodes in compressed hostlists; those missing readings cannot be reconstructed and do not establish that the GPUs were idle.
 
 ## Queue
 

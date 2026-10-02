@@ -23,11 +23,13 @@ CPU_DATA=$(python3 "$DIR/data_store.py" cpu_samples) || exit 1
 QUEUE_DATA=$(python3 "$DIR/data_store.py" queue_samples) || exit 1
 
 # ---- GPU sampler: ssh to every node currently running a GPU job, read nvidia-smi ----
-# (drop bracket-hostlist entries like "gpu[10-14]" - squeue emits those for
-# multi-node jobs alongside the already-expanded individual node names, so
-# they're redundant and would just fail to resolve as a hostname)
-GPU_NODES=$(squeue --state=RUNNING -h -o "%b %N" 2>>"$LOG" | awk '$1 ~ /gres\/gpu/ {print $NF}' | grep -v '\[' | sort -u)
-ALL_NODES=$(squeue --state=RUNNING -h -o "%N" 2>>"$LOG" | grep -v '\[' | sort -u)
+# Expand every allocated hostlist: a multi-node job has no separate rows
+# for its individual nodes. GPU-capable active nodes are sampled even when
+# the job requests GPUs per job/task instead of through squeue's %b field.
+ALL_NODES=$(squeue --state=RUNNING -a -h -o "%N" 2>>"$LOG" |
+  while IFS= read -r nodes; do scontrol show hostnames "$nodes"; done | sort -u)
+GPU_NODES=$(comm -12 <(printf '%s\n' "$ALL_NODES") \
+  <(sinfo -N -a -h -o "%N|%G" 2>>"$LOG" | awk -F'|' '$2 ~ /gpu:/ {print $1}' | sort -u))
 
 if [ -z "$GPU_NODES" ]; then
   echo "[$TS] no GPU jobs running cluster-wide right now" >> "$LOG"

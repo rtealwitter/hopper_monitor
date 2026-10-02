@@ -24,6 +24,7 @@ import re
 import sys
 import json
 import subprocess
+from collections import defaultdict
 from datetime import datetime, timezone
 from anon import pseudonym
 
@@ -31,10 +32,44 @@ def run(cmd):
     return subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
 
 def parse_gpus(gres_field):
-    if "gpu" not in gres_field:
-        return 0
-    last = gres_field.rsplit(":", 1)[-1]
-    return int(last) if last.isdigit() else 0
+    """Count GPU resources, excluding other comma-separated GRES types."""
+    return sum(int(m.group(1)) for m in re.finditer(
+        r"(?:^|,)(?:gres/)?gpu(?::[^,:=()]+)?[:=](\d+)(?=,|\(|$)",
+        gres_field))
+
+
+def normalize_gpu_allocations(rows):
+    """Repair legacy per-node counts when reading old snapshots.
+
+    Prefer recorded physical bindings (including nonuniform allocations).
+    Before bindings were recorded, legacy gpus was squeue %b, a per-node
+    count, so expand the allocated hostlist. Mark totals to stay idempotent.
+    Raw historical samples remain unchanged on disk.
+    """
+    bindings = defaultdict(set)
+    for row in rows:
+        if row.get("kind") == "gpu_bind":
+            bindings[(row["ts"], row["job_id"])].add((row["node"], row["gpu_idx"]))
+    out = []
+    job_positions = {}
+    for row in rows:
+        if "gpus" in row and row.get("gpus_scope") != "job":
+            row = dict(row)
+            devices = bindings.get((row["ts"], row["job_id"]))
+            nodes = expand_nodelist(row.get("node") or "")
+            row["gpus"] = (len(devices) if devices else
+                           row["gpus"] * max(1, len(nodes)))
+            row["gpus_scope"] = "job"
+        if "gpus" in row:
+            key = (row["ts"], row["job_id"])
+            # Some historical snapshots were appended twice. One job owns
+            # one allocation at a timestamp, even if its row is repeated.
+            if key in job_positions:
+                out[job_positions[key]] = row
+                continue
+            job_positions[key] = len(out)
+        out.append(row)
+    return out
 
 def to_epoch(ts):
     if not ts or ts in ("N/A", "Unknown"):
@@ -211,12 +246,17 @@ def main():
                         "jobsize": int(j)}
 
     squeue_out = run(["squeue", "-h", "-a",
-                       "-o", "%i|%u|%T|%C|%b|%N|%V|%S|%r"])
+                       "-o", "%i|%u|%T|%C|%b|%N|%V|%S|%r|%D"])
+    scontrol_out = run(["scontrol", "show", "job", "-dd", "--json"])
+    bindings = list(gpu_bindings(scontrol_out))
+    devices_by_job = defaultdict(set)
+    for job_id, node, gpu_idx in bindings:
+        devices_by_job[job_id].add((node, gpu_idx))
     for line in squeue_out.splitlines():
         parts = line.split("|")
-        if len(parts) != 9:
+        if len(parts) != 10:
             continue
-        jobid, user, state, cpus, gres, node, submit, start, reason = parts
+        jobid, user, state, cpus, gres, node, submit, start, reason, nnodes = parts
         submit_ep = to_epoch(submit)
         start_ep = to_epoch(start)
         if state == "RUNNING" and start_ep:
@@ -234,14 +274,14 @@ def main():
         row = {
             "ts": ts, "job_id": jobid, "user": uf, "lab": lab, "state": state,
             "cpus": int(cpus) if cpus.isdigit() else 0,
-            "gpus": parse_gpus(gres), "node": node or None,
+            "gpus": (len(devices_by_job[jobid]) if jobid in devices_by_job else
+                     parse_gpus(gres) * int(nnodes)),
+            "gpus_scope": "job", "node": node or None,
             "wait_seconds": wait_seconds, "reason": reason or None,
             "priority": p.get("priority"), "age": p.get("age"),
             "fairshare": p.get("fairshare"), "jobsize": p.get("jobsize"),
         }
         print(json.dumps(row))
-
-    scontrol_out = run(["scontrol", "show", "job", "-dd", "--json"])
 
     # ---- GPU device binding: which physical (node, GPU index) each running
     # job holds, straight from Slurm's own allocation record - no ssh, and no
@@ -251,7 +291,7 @@ def main():
     # this against gpu_samples.jsonl's (node, gpu_idx) readings in
     # render_readme.py lets those readings be attributed even when the
     # ssh-side PID lookup in run.sh comes up empty.
-    for job_id, node, gpu_idx in gpu_bindings(scontrol_out):
+    for job_id, node, gpu_idx in bindings:
         print(json.dumps({"kind": "gpu_bind", "ts": ts, "job_id": job_id,
                            "node": node, "gpu_idx": gpu_idx}))
 

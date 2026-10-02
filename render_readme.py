@@ -11,9 +11,11 @@ No pandas - stdlib json/statistics/collections only, matching the rest of this
 repo's minimalism.
 """
 import json
+import argparse
 import math
 import statistics as stats
 from data_store import sample_files
+from sample_queue import normalize_gpu_allocations
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -265,7 +267,7 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
     handles, labels_ = ax.get_legend_handles_labels()
     if has_idle:
         handles.append(mpatches.Patch(facecolor=rgba(INK_MUTED, 0.35), edgecolor=INK_MUTED,
-                                       hatch="///", label="allocated, idle (per lab)"))
+                                       hatch="///", label="idle or unmeasured (per lab)"))
     if handles:
         ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1),
                    frameon=False, fontsize=8)
@@ -905,13 +907,17 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     lines.append("")
     lines.append(f"![GPU allocation over time]({img_prefix}gpu_alloc_util.png)")
     lines.append("")
-    lines.append("Solid = utilized by lab, hatched = allocated but idle, gray = usage not "
+    lines.append("Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not "
                  "traceable to a lab, dashed line = cluster capacity.")
     lines.append("")
     lines.append("Attribution combines `nvidia-smi`'s process listing with Slurm's "
                  "GPU-to-job binding record" +
                  (f"; the latter caught **{backfilled}** readings the former missed."
                   if backfilled else "."))
+    lines.append("Allocation counts include all nodes of each job, including corrected "
+                 "historical totals. Before October 2, 2026, utilization sampling could "
+                 "skip nodes in compressed hostlists; those missing readings cannot "
+                 "be reconstructed and do not establish that the GPUs were idle.")
     lines.append("")
     if have_queue_wait:
         lines.append("## Queue")
@@ -995,9 +1001,14 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--refresh-archives", action="store_true",
+                        help="Regenerate archived reports after accounting corrections")
+    args = parser.parse_args()
     gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
     cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
-    queue_rows_all = load_jsonl(DIR / "data" / "queue_samples.jsonl")
+    queue_rows_all = normalize_gpu_allocations(
+        load_jsonl(DIR / "data" / "queue_samples.jsonl"))
     queue_rows_only = [r for r in queue_rows_all
                         if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
 
@@ -1012,8 +1023,7 @@ def main():
 
     # ================= weekly archive catch-up =================
     # One dated snapshot per fully-elapsed calendar week (Monday-Sunday).
-    # Idempotent: a week's folder, once created, is never regenerated - each
-    # archive is a frozen record of that week, not a rolling one.
+    # Existing archives stay frozen unless explicitly refreshing accounting.
     all_ts = sorted({parse_ts(r["ts"]) for r in gpu_rows} |
                      {parse_ts(r["ts"]) for r in queue_rows_only} |
                      {parse_ts(r["ts"]) for r in cpu_util_rows})
@@ -1025,7 +1035,7 @@ def main():
             if has_data:
                 label = f"{week_start:%Y-%m-%d}_{(week_end - timedelta(days=1)):%Y-%m-%d}"
                 week_dir = ARCHIVE / label
-                if not week_dir.exists():
+                if args.refresh_archives or not week_dir.exists():
                     render(gpu_rows, cpu_util_rows, queue_rows_all,
                            week_dir, week_dir / "README.md",
                            week_start, week_end, img_prefix="", live=False,
