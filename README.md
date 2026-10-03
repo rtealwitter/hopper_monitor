@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-10-03T00:30:29-07:00
-Samples: 2798 queue snapshots total (335 in the last 7 days), 2567 GPU snapshots total (335 in the last 7 days)
+Last updated: 2026-10-03T01:00:28-07:00
+Samples: 2799 queue snapshots total (335 in the last 7 days), 2568 GPU snapshots total (335 in the last 7 days)
 
 ## Resources
 
@@ -16,23 +16,23 @@ Samples: 2798 queue snapshots total (335 in the last 7 days), 2567 GPU snapshots
 
 ## Headline
 
-- **70.5%** (last 7 days) vs **49.3%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
-- **31.1%** (last 7 days) vs **43.6%** (all time) average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **70.6%** (last 7 days) vs **49.3%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
+- **31.2%** (last 7 days) vs **43.6%** (all time) average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
 - **96.1%** (last 7 days) vs **91.9%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Most open times
 
-Based on 60 days of history so far, `hopper.cluster` has historically been most open on **Saturdays** (37.5% of GPUs allocated on average) and around **07:00-08:00** (44.5% of GPUs allocated on average). Recomputed from all-time data on every cron tick, so it sharpens as more history accumulates.
+Based on 60 days of history so far, `hopper.cluster` has historically been most open on **Saturdays** (37.6% of GPUs allocated on average) and around **07:00-08:00** (44.5% of GPUs allocated on average). Recomputed from all-time data on every cron tick, so it sharpens as more history accumulates.
 
 ## Per lab / per user
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
-<tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>3499.6</td><td align='right'>14065.8</td><td align='right'>23%</td><td align='right'>24%</td></tr>
-<tr style='background-color:#fae3e3'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3312.5</td><td align='right'>7703.0</td><td align='right'>86%</td><td align='right'>84%</td></tr>
+<tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>3491.6</td><td align='right'>14065.8</td><td align='right'>22%</td><td align='right'>24%</td></tr>
+<tr style='background-color:#fae3e3'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3328.5</td><td align='right'>7719.0</td><td align='right'>86%</td><td align='right'>85%</td></tr>
 <tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>200.5</td><td align='right'>247.0</td><td align='right'>67%</td><td align='right'>68%</td></tr>
 <tr style='background-color:#fae3e3'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>46.5</td><td align='right'>250.5</td><td align='right'>72%</td><td align='right'>63%</td></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>42.7</td><td align='right'>17900.2</td><td align='right'>48%</td><td align='right'>59%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>41.7</td><td align='right'>17900.2</td><td align='right'>47%</td><td align='right'>59%</td></tr>
 <tr style='background-color:#ededec'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>8.5</td><td align='right'>55.5</td><td align='right'>46%</td><td align='right'>39%</td></tr>
 <tr style='background-color:#fae3e3'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>5.5</td><td align='right'>8.0</td><td align='right'>55%</td><td align='right'>54%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>0.0</td><td align='right'>1028.0</td><td align='right'>—</td><td align='right'>7%</td></tr>
@@ -42,22 +42,22 @@ Based on 60 days of history so far, `hopper.cluster` has historically been most 
 <tr style='background-color:#fbebf1'><td>gillen-lab</td><td>user-d21e03f5</td><td align='right'>0.0</td><td align='right'>5.0</td><td align='right'>—</td><td align='right'>72%</td></tr>
 <tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#fce8e0'><td>enkavi-lab</td><td>user-c21bdaa4</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#ededec'><td>ritz-lab</td><td>user-4a771e4a</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fcf0d8'><td>gelman-lab</td><td>user-1f45dcbc</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-dad71a72</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#e3e1f1'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#dfeaf8'><td>batta-lab</td><td>user-58bad794</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#ededec'><td>ritz-lab</td><td>user-938729e2</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#ededec'><td>ritz-lab</td><td>user-37f252dd</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
-<tr style='background-color:#fbebf1'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fcf0d8'><td>gelman-lab</td><td>user-1f45dcbc</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#e3e1f1'><td>kao-lab</td><td>user-964f71b2</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#ededec'><td>ritz-lab</td><td>user-4a771e4a</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 <tr style='background-color:#fae3e3'><td>nerenberg-lab</td><td>user-87cc74d1</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-dad71a72</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#fbebf1'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
+<tr style='background-color:#ededec'><td>ritz-lab</td><td>user-938729e2</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-09-26 00:30 to 2026-10-03 00:30** (PDT).
+Charts below cover the trailing 7 days: **2026-09-26 01:00 to 2026-10-03 01:00** (PDT).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
@@ -65,7 +65,7 @@ Charts below cover the trailing 7 days: **2026-09-26 00:30 to 2026-10-03 00:30**
 
 Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not traceable to a lab, dashed line = cluster capacity.
 
-Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **799** readings the former missed.
+Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **791** readings the former missed.
 Allocation counts include all nodes of each job, including corrected historical totals. Before October 2, 2026, utilization sampling could skip nodes in compressed hostlists; those missing readings cannot be reconstructed and do not establish that the GPUs were idle.
 
 ## Queue
@@ -97,6 +97,6 @@ Dated snapshots of this dashboard, one per fully-elapsed calendar week:
 
 ## Recommendations
 
-1. **Weight GPU usage in fairshare.** `TRESBillingWeights`/`PriorityWeightTRES` are unset, so idle GPUs cost nothing in priority - the failure mode the scatter above flags (upper-left: low CPU usage, high GPU usage). Fix: `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` then `scontrol reconfigure`. Start `<weight>` near the CPUs-per-GPU ratio (128/4=32) and tune against this week's numbers (70.5% allocated, 31.1% utilized when allocated) - a policy call, so loop in whoever owns cluster allocation.
-2. **Escalate on sustained low utilization** (see table and scatter above). Current top candidate (most measured idle GPU-hours over the last 7d): `user-0db9ced0` in `zhuang-lab` - 2953 idle of 3818.1 GPU-hours observed (23% utilization). Needs a utilization threshold (e.g. <20% mean over 50+ GPU-hours) and a grace period, then either a soft nudge (Slack/email) or a hard QOS penalty (`sacctmgr modify qos ... set Priority-=<n>`). Neither exists yet - this is read-only signal, not enforced policy.
+1. **Weight GPU usage in fairshare.** `TRESBillingWeights`/`PriorityWeightTRES` are unset, so idle GPUs cost nothing in priority - the failure mode the scatter above flags (upper-left: low CPU usage, high GPU usage). Fix: `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` then `scontrol reconfigure`. Start `<weight>` near the CPUs-per-GPU ratio (128/4=32) and tune against this week's numbers (70.6% allocated, 31.2% utilized when allocated) - a policy call, so loop in whoever owns cluster allocation.
+2. **Escalate on sustained low utilization** (see table and scatter above). Current top candidate (most measured idle GPU-hours over the last 7d): `user-0db9ced0` in `zhuang-lab` - 2948 idle of 3806.6 GPU-hours observed (22% utilization). Needs a utilization threshold (e.g. <20% mean over 50+ GPU-hours) and a grace period, then either a soft nudge (Slack/email) or a hard QOS penalty (`sacctmgr modify qos ... set Priority-=<n>`). Neither exists yet - this is read-only signal, not enforced policy.
 
