@@ -187,10 +187,8 @@ def gpu_bindings(scontrol_json):
     job_resources.allocated_nodes on older Slurm JSON or the top-level nodes
     hostlist on current Hopper. job_id matches squeue/sprio's array and
     heterogeneous-component formats."""
-    try:
-        jobs = json.loads(scontrol_json).get("jobs", []) if scontrol_json.strip() else []
-    except json.JSONDecodeError:
-        jobs = []
+    jobs = (json.loads(scontrol_json)["jobs"] if isinstance(scontrol_json, str)
+            else scontrol_json)
     for j in jobs:
         if "RUNNING" not in (j.get("job_state") or []):
             continue
@@ -223,10 +221,8 @@ def job_id_map(scontrol_json):
     sprio (and everywhere else in this repo) use the array-expanded display
     id ("<array_job_id>_<array_task_id>"). Used to translate sample_cpu.py's
     cgroup-sourced job ids so they join against the rest of the data."""
-    try:
-        jobs = json.loads(scontrol_json).get("jobs", []) if scontrol_json.strip() else []
-    except json.JSONDecodeError:
-        jobs = []
+    jobs = (json.loads(scontrol_json)["jobs"] if isinstance(scontrol_json, str)
+            else scontrol_json)
     for j in jobs:
         if "RUNNING" not in (j.get("job_state") or []):
             continue
@@ -242,21 +238,23 @@ def main():
         parts = line.split("|")
         if len(parts) != 6:
             continue
-        jobid, y, a, f, j, _partition_prio = parts
+        jobid, y, a, f, j, _partition_prio = (part.strip() for part in parts)
         prio[jobid] = {"priority": int(y), "age": int(a), "fairshare": int(f),
                         "jobsize": int(j)}
 
     squeue_out = run(["squeue", "-h", "-a",
                        "-o", "%i|%u|%T|%C|%b|%N|%V|%S|%r|%D"])
-    scontrol_out = run(["scontrol", "show", "job", "-dd", "--json"])
-    bindings = list(gpu_bindings(scontrol_out))
+    jobs = json.loads(run(["scontrol", "show", "job", "-dd", "--json"]))["jobs"]
+    if not isinstance(jobs, list):
+        raise ValueError("Slurm jobs must be a list")
+    bindings = list(gpu_bindings(jobs))
     devices_by_job = defaultdict(set)
     for job_id, node, gpu_idx in bindings:
         devices_by_job[job_id].add((node, gpu_idx))
     for line in squeue_out.splitlines():
         parts = line.split("|")
         if len(parts) != 10:
-            continue
+            raise ValueError("Incomplete squeue row")
         jobid, user, state, cpus, gres, node, submit, start, reason, nnodes = parts
         submit_ep = to_epoch(submit)
         start_ep = to_epoch(start)
@@ -271,7 +269,7 @@ def main():
         uf = pseudonym(user, salt) if mode == "anon_users" else user
         # sprio reports priority against the base job id; array tasks like
         # "258364_412" or "258364_[413-831%40]" need that prefix stripped to join.
-        p = prio.get(jobid.split("_")[0], {})
+        p = prio.get(jobid, prio.get(jobid.split("_")[0], {}))
         row = {
             "ts": ts, "job_id": jobid, "user": uf, "lab": lab, "state": state,
             "cpus": int(cpus) if cpus.isdigit() else 0,
@@ -298,7 +296,7 @@ def main():
 
     # ---- raw <-> display job id translation, for joining sample_cpu.py's
     # cgroup-sourced CPU accounting (see job_id_map() above).
-    for raw_id, display_id in job_id_map(scontrol_out):
+    for raw_id, display_id in job_id_map(jobs):
         print(json.dumps({"kind": "job_id_map", "ts": ts, "raw_id": raw_id,
                            "job_id": display_id}))
 

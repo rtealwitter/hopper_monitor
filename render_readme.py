@@ -14,6 +14,9 @@ import json
 import argparse
 import math
 import statistics as stats
+import colorsys
+import hashlib
+from accounting import attribute_gpus, cpu_rates, parse_ts
 from data_store import sample_files
 from sample_queue import normalize_gpu_allocations
 from collections import defaultdict
@@ -37,12 +40,17 @@ ROLLING_WINDOW_DAYS = 7
 # fairshare accounting rather than a lifetime-cumulative total.
 HALF_LIFE_HOURS = 168.0
 
-# Fixed-order categorical palette; witter-lab pinned to teal, other labs take
-# the rest in order, extras fold into "Other" (muted gray).
-WITTER_LAB = "witter-lab"
-WITTER_COLOR = "#009999"
-LAB_COLORS = ["#2a78d6", "#eb6834", "#eda100",
-              "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+# Stable lab colors across rolling reports, archives, and tables. Gray is
+# reserved for missing ownership; known labs never disappear into "Other".
+LAB_PALETTE = {
+    "witter-lab": "#009999", "batta-lab": "#2a78d6",
+    "enkavi-lab": "#eb6834", "gelman-lab": "#eda100",
+    "gillen-lab": "#e87ba4", "ibarragarciapadilla-lab": "#008300",
+    "kao-lab": "#e34948", "nerenberg-lab": "#4a3aa7",
+    "ritz-lab": "#8c564b", "guo-lab": "#bcbd22",
+    "zhuang-lab": "#297fb8",
+}
+LAB_COLORS = list(LAB_PALETTE.values())
 OTHER_COLOR = "#898781"
 # GPU utilization real but not attributable to any job/lab.
 UNATTRIB_FILL = "#898781"
@@ -76,10 +84,6 @@ def load_jsonl(path):
     return rows
 
 
-def parse_ts(ts):
-    return datetime.fromisoformat(ts)
-
-
 def monday_of(dt):
     """00:00 on the Monday of dt's calendar week, same tz as dt."""
     monday_date = (dt - timedelta(days=dt.weekday())).date()
@@ -102,39 +106,32 @@ def lighten(hexcolor, amount=0.85):
 
 
 def lab_palette(labs):
-    """Fixed-order hue assignment; witter-lab is always teal. Labs beyond
-    the remaining 7 slots fold into 'Other'."""
-    ranked = sorted(l for l in labs if l != WITTER_LAB)
     colors = {}
-    shown = []
-    if WITTER_LAB in labs:
-        colors[WITTER_LAB] = WITTER_COLOR
-        shown.append(WITTER_LAB)
-    for lab, color in zip(ranked, LAB_COLORS):
-        colors[lab] = color
-        shown.append(lab)
-    for lab in ranked[len(LAB_COLORS):]:
-        colors[lab] = OTHER_COLOR
-    return colors, set(shown)
-
-
-def bucket_label(lab, shown):
-    return lab if lab in shown else "Other"
+    for lab in labs:
+        if lab in LAB_PALETTE:
+            colors[lab] = LAB_PALETTE[lab]
+        elif lab == "unknown":
+            colors[lab] = UNATTRIB_FILL
+        else:
+            # Deterministic colors for new labs, independent of other labs present.
+            hue = int(hashlib.sha256(lab.encode()).hexdigest()[:8], 16) / 2**32
+            rgb = colorsys.hsv_to_rgb(hue, 0.7, 0.7)
+            colors[lab] = "#" + "".join(f"{round(c * 255):02x}" for c in rgb)
+    return colors
 
 
 def interval_hours(sorted_distinct_ts):
-    """Wall-clock hours each sample timestamp represents, for GPU/CPU-hour
-    integration - the gap to the next sample, falling back to the median gap
-    for the final (still-open) sample."""
+    """Integrate at most one 30-minute sampling period per observation.
+
+    Collector outages are missing evidence, not hours of measured usage.
+    """
     if not sorted_distinct_ts:
         return {}
-    deltas = []
     intervals = {}
     for i in range(len(sorted_distinct_ts) - 1):
         d = (sorted_distinct_ts[i + 1] - sorted_distinct_ts[i]).total_seconds() / 3600
-        deltas.append(d)
-        intervals[sorted_distinct_ts[i]] = d
-    intervals[sorted_distinct_ts[-1]] = stats.median(deltas) if deltas else 0.5
+        intervals[sorted_distinct_ts[i]] = min(d, 0.5)
+    intervals[sorted_distinct_ts[-1]] = 0.5
     return intervals
 
 
@@ -200,7 +197,7 @@ def warp_time_axis(ax, x_datetimes, ref, scale_hours=3.0):
     return x_warped
 
 
-def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
+def usage_chart(path, title, ylabel, x, series_by_lab, colors,
                  unattrib_y=None, unattrib_label="usage, unattributed",
                  overlay_y=None, overlay_label="cluster capacity", warp_ref=None):
     """series_by_lab: {lab: (utilized_list, idle_list)}, idle_list None if
@@ -208,20 +205,23 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
     lab's utilized (solid) + idle (hatched, same color), then unattrib_y
     (gray) and overlay_y (dashed reference line) on top."""
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    labs = sorted(series_by_lab, key=lambda l: -sum(series_by_lab[l][0]))
+    labs = sorted((lab for lab, (util, idle) in series_by_lab.items()
+                   if any(util) or (idle is not None and any(idle))),
+                  key=lambda lab: (-sum(series_by_lab[lab][0]), lab))
     single_point = len(x) < 2
     has_idle = any(idle is not None for _, idle in series_by_lab.values())
 
-    x_plot = warp_time_axis(ax, x, warp_ref) if warp_ref is not None else x
+    x_plot = warp_time_axis(ax, x, warp_ref) if warp_ref is not None and x else x
     bar_width = 0.05 if warp_ref is not None else 0.01
 
     entries = []  # (label_or_None, values, facecolor, edgecolor, hatch)
     for l in labs:
         util_vals, idle_vals = series_by_lab[l]
-        entries.append((bucket_label(l, shown), util_vals, colors[l], "none", None))
+        color = colors.get(l, UNATTRIB_FILL)
+        entries.append((l, util_vals, color, "none", None))
         if idle_vals is not None:
-            entries.append((None, idle_vals, rgba(colors[l], 0.35), colors[l], "///"))
-    if unattrib_y is not None:
+            entries.append((None, idle_vals, rgba(color, 0.35), color, "///"))
+    if unattrib_y is not None and any(unattrib_y):
         entries.append((unattrib_label, unattrib_y, UNATTRIB_FILL, UNATTRIB_FILL, None))
 
     if entries:
@@ -276,61 +276,21 @@ def usage_chart(path, title, ylabel, x, series_by_lab, colors, shown,
     plt.close(fig)
 
 
-def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
+def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all, *, usage=None):
     """Headline percentages + per-lab/user table from a given sample set -
     caller decides the time window (or none) by what rows it passes in.
-    Self-contained (redoes the same dedupe/backfill/CPU-equivalent work
-    render() does for its charts) so it can be run once over all-time data
-    and once over a windowed slice without the two runs interfering."""
+    Charts can pass their prepared usage so both views use identical joins.
+    Raw input rows are never mutated."""
     queue_rows_all = normalize_gpu_allocations(queue_rows_all)
     queue_rows = [r for r in queue_rows_all
                   if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
-    gpu_bind_rows = [r for r in queue_rows_all if r.get("kind") == "gpu_bind"]
 
-    # dict(r): copy, not reference - gpu_rows may be the same row objects
-    # render() (or another compute_headline() call) is also backfilling;
-    # mutating shared dicts here would make the other pass's own backfilled
-    # count silently undercount.
-    by_key = {}
-    for r in gpu_rows:
-        key = (r["ts"], r["node"], r["gpu_idx"])
-        if key not in by_key or (r.get("job") and not by_key[key].get("job")):
-            by_key[key] = dict(r)
-    gpu_dedup = list(by_key.values())
-
-    bind_job_by_key = {(r["ts"], r["node"], r["gpu_idx"]): r["job_id"] for r in gpu_bind_rows}
-    owner_by_ts_job = {(r["ts"], r["job_id"]): (r.get("user"), r.get("lab"))
-                        for r in queue_rows if r.get("job_id")}
-    for r in gpu_dedup:
-        if r.get("job"):
-            continue
-        job_id = bind_job_by_key.get((r["ts"], r["node"], r["gpu_idx"]))
-        owner = owner_by_ts_job.get((r["ts"], job_id)) if job_id else None
-        if owner:
-            r["job"], r["user"], r["lab"] = job_id, owner[0], owner[1]
-
-    raw_to_display_by_ts = defaultdict(dict)
-    for r in queue_rows_all:
-        if r.get("kind") == "job_id_map":
-            raw_to_display_by_ts[r["ts"]][r["raw_id"]] = r["job_id"]
-
-    cpu_by_node_job = defaultdict(list)
-    for r in cpu_util_rows:
-        cpu_by_node_job[(r["node"], r["job_id"])].append((r["ts"], r["cpu_usage_usec"]))
-
-    cpu_equiv_by_ts_job = defaultdict(float)
-    for (node, raw_id), samples in cpu_by_node_job.items():
-        samples.sort(key=lambda s: parse_ts(s[0]))
-        for (t_prev, u_prev), (t_cur, u_cur) in zip(samples, samples[1:]):
-            wall_seconds = (parse_ts(t_cur) - parse_ts(t_prev)).total_seconds()
-            delta_usec = u_cur - u_prev
-            if wall_seconds <= 0 or delta_usec < 0:
-                continue
-            display_id = raw_to_display_by_ts.get(t_cur, {}).get(raw_id)
-            if not display_id:
-                continue
-            cpu_equiv_by_ts_job[(t_cur, display_id)] += delta_usec / wall_seconds / 1_000_000.0
+    if usage is None:
+        gpu_dedup, _ = attribute_gpus(gpu_rows, queue_rows_all)
+        cpu_equiv_by_ts_job = cpu_rates(cpu_util_rows, queue_rows_all)
+    else:
+        gpu_dedup, cpu_equiv_by_ts_job = usage
 
     latest_totals = totals_rows[-1] if totals_rows else {"cpus_total": 0, "gpus_total": 0}
     gpus_total = latest_totals["gpus_total"] or 1
@@ -357,12 +317,13 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
                             if allocated_gpu_readings else 0.0)
 
     cpus_alloc_by_ts_job = {(r["ts"], r["job_id"]): r["cpus"] for r in running}
-    cpu_util_fractions = []
+    cpu_busy = cpu_measured = 0.0
     for (t, job_id), equiv in cpu_equiv_by_ts_job.items():
         cores = cpus_alloc_by_ts_job.get((t, job_id))
         if cores:
-            cpu_util_fractions.append(100 * min(1.0, equiv / cores))
-    pct_cpu_util_when_alloc = stats.mean(cpu_util_fractions) if cpu_util_fractions else 0.0
+            cpu_busy += min(cores, equiv)
+            cpu_measured += cores
+    pct_cpu_util_when_alloc = 100 * cpu_busy / cpu_measured if cpu_measured else 0.0
 
     distinct_ts = sorted({parse_ts(r["ts"]) for r in queue_rows_all})
     intervals = interval_hours(distinct_ts)
@@ -402,7 +363,7 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
             "idle_gpu_hours": (measured_idle_hours[key]
                                if measured_gpu_hours.get(key) else None),
         })
-    table_rows.sort(key=lambda r: (-r["gpu_hours"]))
+    table_rows.sort(key=lambda r: (-r["gpu_hours"], r["lab"], r["user"]))
 
     # Only observed allocated readings support idle-time estimates. Never
     # extrapolate sparse telemetry over the entire allocation: missing
@@ -416,13 +377,13 @@ def compute_headline(gpu_rows, cpu_util_rows, queue_rows_all):
 
     all_labs = {r["lab"] for r in gpu_dedup if r.get("lab")} | \
                {r["lab"] for r in queue_rows if r.get("lab")}
-    colors, shown = lab_palette(all_labs)
+    colors = lab_palette(all_labs)
 
     return {
         "gpus_total": gpus_total, "cpus_total": cpus_total,
         "pct_gpu_alloc": pct_gpu_alloc, "pct_util_when_alloc": pct_util_when_alloc,
         "pct_cpu_util_when_alloc": pct_cpu_util_when_alloc,
-        "table_rows": table_rows, "colors": colors, "shown": shown,
+        "table_rows": table_rows, "colors": colors,
         "worst_offender": worst_offender,
         "escalation_min_gpu_hours": escalation_min_gpu_hours,
         "n_queue_snapshots": len(distinct_ts),
@@ -499,8 +460,6 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     queue_rows = [r for r in queue_rows_all
                   if r.get("kind") not in ("totals", "gpu_bind", "job_id_map", "priority_config")]
     totals_rows = [r for r in queue_rows_all if r.get("kind") == "totals"]
-    gpu_bind_rows = [r for r in queue_rows_all if r.get("kind") == "gpu_bind"]
-    job_id_map_rows = [r for r in queue_rows_all if r.get("kind") == "job_id_map"]
     priority_config_rows = [r for r in queue_rows_all if r.get("kind") == "priority_config"]
     # Live, re-checked every cron tick (sample_queue.py queries scontrol
     # directly) - not cached, so the recommendation below disappears the
@@ -520,77 +479,38 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     # ---- headline stats + per-lab/user table: on the live dashboard, once
     # over all-time data and once over just this window; archived weeks only
     # ever cover their own window, so there's no separate "all time" cut. ----
-    headline_week = compute_headline(gpu_rows, cpu_util_rows, queue_rows_all)
+    gpu_dedup, backfilled = attribute_gpus(gpu_rows, queue_rows_all)
+    # Include the preceding counter to measure CPU usage at the window boundary.
+    cpu_equiv_by_ts_job = {key: value for key, value in
+                          cpu_rates(cpu_util_rows_all, queue_rows_all_unfiltered).items()
+                          if window_start <= parse_ts(key[0]) < window_end}
+    headline_week = compute_headline(gpu_rows, cpu_util_rows, queue_rows_all,
+                                    usage=(gpu_dedup, cpu_equiv_by_ts_job))
     headline_all = (compute_headline(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered)
                      if live else None)
     open_times = compute_open_times(queue_rows_all_unfiltered) if live else None
 
-    # ---- dedupe GPU readings to one row per (ts, node, gpu_idx). dict(r):
-    # copy, not reference - main() reuses the same loaded row objects across
-    # multiple render() calls (each archived week, plus the live dashboard),
-    # and mutating them here for backfill would make a later call's own
-    # backfilled count silently undercount. ----
-    by_key = {}
-    for r in gpu_rows:
-        key = (r["ts"], r["node"], r["gpu_idx"])
-        # prefer the row that carries an attributed job, if any duplicate exists
-        if key not in by_key or (r.get("job") and not by_key[key].get("job")):
-            by_key[key] = dict(r)
-    gpu_dedup = list(by_key.values())
-
-    # ---- backfill job/user/lab from Slurm's GPU binding record (scontrol),
-    # for readings the PID-based lookup in run.sh missed (e.g. containerized
-    # processes). Only fills gaps. ----
-    bind_job_by_key = {(r["ts"], r["node"], r["gpu_idx"]): r["job_id"] for r in gpu_bind_rows}
     owner_by_ts_job = {(r["ts"], r["job_id"]): (r.get("user"), r.get("lab"))
-                        for r in queue_rows if r.get("job_id")}
-    backfilled = 0
-    for r in gpu_dedup:
-        if r.get("job"):
-            continue
-        job_id = bind_job_by_key.get((r["ts"], r["node"], r["gpu_idx"]))
-        owner = owner_by_ts_job.get((r["ts"], job_id)) if job_id else None
-        if not owner:
-            continue
-        r["job"], r["user"], r["lab"] = job_id, owner[0], owner[1]
-        backfilled += 1
-
-    # ---- CPU utilization from cgroup accounting: delta of cumulative
-    # usage_usec between consecutive samples, divided by wall-clock seconds,
-    # gives CPU-equivalents busy. job_id_map translates raw cgroup ids to
-    # the display job id everything else joins on.
-    raw_to_display_by_ts = defaultdict(dict)
-    for r in job_id_map_rows:
-        raw_to_display_by_ts[r["ts"]][r["raw_id"]] = r["job_id"]
-
-    cpu_by_node_job = defaultdict(list)
-    for r in cpu_util_rows:
-        cpu_by_node_job[(r["node"], r["job_id"])].append((r["ts"], r["cpu_usage_usec"]))
-
-    cpu_equiv_by_ts_job = defaultdict(float)  # (ts, display_job_id) -> CPU-equivalents
-    for (node, raw_id), samples in cpu_by_node_job.items():
-        samples.sort(key=lambda s: parse_ts(s[0]))
-        for (t_prev, u_prev), (t_cur, u_cur) in zip(samples, samples[1:]):
-            wall_seconds = (parse_ts(t_cur) - parse_ts(t_prev)).total_seconds()
-            delta_usec = u_cur - u_prev
-            if wall_seconds <= 0 or delta_usec < 0:
-                continue  # non-positive gap, or a cgroup reset/restart - no meaningful rate
-            display_id = raw_to_display_by_ts.get(t_cur, {}).get(raw_id)
-            if not display_id:
-                continue
-            cpu_equiv_by_ts_job[(t_cur, display_id)] += delta_usec / wall_seconds / 1_000_000.0
+                       for r in queue_rows}
 
     by_ts_lab_cpu_util = defaultdict(lambda: defaultdict(float))
     by_ts_total_cpu_util = defaultdict(float)
+    by_ts_unknown_cpu_util = defaultdict(float)
+    cpus_by_ts_job = {(r["ts"], r["job_id"]): r["cpus"] for r in queue_rows
+                      if r["state"] == "RUNNING"}
     for (t, job_id), equiv in cpu_equiv_by_ts_job.items():
+        if (t, job_id) in cpus_by_ts_job:
+            equiv = min(equiv, cpus_by_ts_job[(t, job_id)])
         by_ts_total_cpu_util[t] += equiv
         owner = owner_by_ts_job.get((t, job_id))
         if owner and owner[1]:
             by_ts_lab_cpu_util[t][owner[1]] += equiv
+        else:
+            by_ts_unknown_cpu_util[t] += equiv
 
     all_labs = {r["lab"] for r in gpu_dedup if r.get("lab")} | \
                {r["lab"] for r in queue_rows if r.get("lab")}
-    colors, shown = lab_palette(all_labs)
+    colors = lab_palette(all_labs)
 
     # ================= chart-only derived data (headline stats above cover
     #                    the percentages/table; charts still need per-ts,
@@ -631,22 +551,21 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         alloc_list = [alloc_by_ts_lab_cpu.get(t, {}).get(lab, 0) for t in ts_sorted_cpu]
         idle_list = [max(0.0, a - u) for a, u in zip(alloc_list, util_list)]
         series_cpu[lab] = (util_list, idle_list)
-    attributed_cpu_total = {t: sum(by_ts_lab_cpu_util[t].values()) for t in ts_sorted_cpu}
-    unattrib_cpu_y = [max(0.0, by_ts_total_cpu_util.get(t, 0.0) - attributed_cpu_total[t])
-                       for t in ts_sorted_cpu]
+    unattrib_cpu_y = [by_ts_unknown_cpu_util[t] for t in ts_sorted_cpu]
     series_cpu = consume_idle_with_unattributed(series_cpu, unattrib_cpu_y)
     cap_cpu = [by_ts_totals.get(t, {}).get("cpus_total") or cpus_total for t in ts_sorted_cpu]
     usage_chart(assets_dir / "cpu_alloc.png", "CPU allocation over time (by lab)",
-                "CPUs", x_cpu, series_cpu, colors, shown,
+                "CPUs", x_cpu, series_cpu, colors,
                 unattrib_y=unattrib_cpu_y, unattrib_label="computing, unattributed",
                 overlay_y=cap_cpu, warp_ref=warp_ref)
 
     by_ts_lab_util = defaultdict(lambda: defaultdict(float))
-    by_ts_total_util = defaultdict(float)
+    by_ts_unknown_util = defaultdict(float)
     for r in gpu_dedup:
-        by_ts_total_util[r["ts"]] += r["util_gpu"] / 100.0
         if r.get("job") and r.get("lab"):
             by_ts_lab_util[r["ts"]][r["lab"]] += r["util_gpu"] / 100.0
+        else:
+            by_ts_unknown_util[r["ts"]] += r["util_gpu"] / 100.0
 
     ts_sorted_gpu = sorted({r["ts"] for r in gpu_dedup} |
                            {r["ts"] for r in queue_rows_all}, key=parse_ts)
@@ -659,13 +578,12 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
         alloc_list = [alloc_by_ts_lab_gpu.get(t, {}).get(lab, 0) for t in ts_sorted_gpu]
         idle_list = [max(0.0, a - u) for a, u in zip(alloc_list, util_list)]
         series_gpu[lab] = (util_list, idle_list)
-    attributed_total = {t: sum(by_ts_lab_util[t].values()) for t in ts_sorted_gpu}
-    unattrib_y = [max(0.0, by_ts_total_util[t] - attributed_total[t]) for t in ts_sorted_gpu]
+    unattrib_y = [by_ts_unknown_util[t] for t in ts_sorted_gpu]
     series_gpu = consume_idle_with_unattributed(series_gpu, unattrib_y)
     cap_gpu = [by_ts_totals.get(t, {}).get("gpus_total") or gpus_total for t in ts_sorted_gpu]
 
     usage_chart(assets_dir / "gpu_alloc_util.png", "GPU allocation over time (by lab)",
-                "GPUs", x_gpu, series_gpu, colors, shown,
+                "GPUs", x_gpu, series_gpu, colors,
                 unattrib_y=unattrib_y, unattrib_label="computing, unattributed",
                 overlay_y=cap_gpu, warp_ref=warp_ref)
 
@@ -749,6 +667,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
                 decay_points.append((cpu_d, gpu_d))
             prev_dt = dt
 
+    decay_points = [(cpu, gpu) for cpu, gpu in decay_points if cpu > 0 and gpu > 0]
     if decay_points:
         cpu_vals = [p[0] for p in decay_points]
         gpu_vals = [p[1] for p in decay_points]
@@ -829,7 +748,7 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
                 "util_week": w["util_pct"] if w else None,
                 "util_all": r["util_pct"],
             })
-        rows.sort(key=lambda r: (-r["gpu_hours_week"], -r["gpu_hours_all"]))
+        rows.sort(key=lambda r: (-r["gpu_hours_week"], -r["gpu_hours_all"], r["lab"], r["user"]))
 
         block = ["## Per lab / per user", "", "<table>",
                   "<tr><th>Lab</th><th>User</th>"
@@ -920,8 +839,8 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     lines.append("")
     lines.append(f"![GPU allocation over time]({img_prefix}gpu_alloc_util.png)")
     lines.append("")
-    lines.append("Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not "
-                 "traceable to a lab, dashed line = cluster capacity.")
+    lines.append("Each named lab has its own color. Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not "
+                 "traceable to a lab, dashed line = cluster capacity. Zero-usage legend entries are omitted.")
     lines.append("")
     lines.append("Attribution combines `nvidia-smi`'s process listing with Slurm's "
                  "GPU-to-job binding record" +
@@ -931,6 +850,9 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
                  "historical totals. Before October 2, 2026, utilization sampling could "
                  "skip nodes in compressed hostlists; those missing readings cannot "
                  "be reconstructed and do not establish that the GPUs were idle.")
+    lines.append("GPU-hour estimates credit at most one 30-minute interval per sample; "
+                 "collector outages are not extrapolated. CPU utilization is weighted "
+                 "by the allocated cores of jobs with observed counters.")
     lines.append("")
     if have_queue_wait:
         lines.append("## Queue")

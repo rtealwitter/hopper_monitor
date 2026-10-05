@@ -3,6 +3,7 @@ import io
 import os
 import fcntl
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -102,6 +103,8 @@ class SamplerAuditTests(unittest.TestCase):
         def command(cmd):
             if cmd[0] == "sinfo":
                 return "2|0/32/0/32|gpu:a100:2,gpu:l40s:4,mps:100"
+            if cmd[:3] == ["scontrol", "show", "job"]:
+                return '{"jobs": []}'
             return ""
         output = io.StringIO()
         with patch("sample_queue.run", side_effect=command), \
@@ -213,6 +216,35 @@ class RunnerAuditTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertFalse((root / "data").exists())
             self.assertIn("previous run still in progress", (root / "monitor.log").read_text())
+
+    def test_failed_ssh_discards_partial_gpu_and_cpu_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.fixture(temp)
+            (root / "data").mkdir()
+            for name in ("sample_gpu.py", "sample_cpu.py", "data_store.py", "anon.py"):
+                shutil.copy(ROOT / name, root / name)
+            (root / "sample_queue.py").write_text('print(\'{"kind":"totals"}\')\n')
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            commands = {
+                "squeue": "#!/bin/sh\necho gpu01\n",
+                "scontrol": "#!/bin/sh\necho gpu01\n",
+                "sinfo": "#!/bin/sh\necho 'gpu01|gpu:l40s:4'\n",
+                "ssh": "#!/bin/sh\nprintf '%s\\n' '--GPU--' '0, GPU-a, 80, 0, 100, 1000' 'CPUJOB 7 1000'\nexit 1\n",
+                "sbatch": "#!/bin/sh\nexit 1\n",  # stop before publishing
+            }
+            for name, source in commands.items():
+                path = fake_bin / name
+                path.write_text(source)
+                path.chmod(0o755)
+            result = subprocess.run(["bash", str(root / "run.sh")],
+                                    env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 1)
+            for stream in ("gpu", "cpu"):
+                parts = (root / "data" / f"{stream}_samples").glob("*.jsonl")
+                self.assertFalse(any(p.stat().st_size for p in parts))
+            self.assertEqual((root / "monitor.log").read_text().count("discarded"), 2)
 
 
 if __name__ == "__main__":

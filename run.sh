@@ -1,7 +1,7 @@
 #!/bin/bash
 # hopper_monitor - one sampling pass. Invoked by cron every INTERVAL_MIN, forever
 # (no self-expiry - this is an ongoing public tracker, not a fixed-length experiment).
-set -uo pipefail
+set -euo pipefail
 
 DIR="$HOME/hopper_monitor"
 CONFIG="$DIR/config"
@@ -10,6 +10,7 @@ LOG="$DIR/monitor.log"
 
 # shellcheck source=/dev/null
 source "$CONFIG"   # sets MODE (anon_users|named), INTERVAL_MIN, SALT
+case "$MODE" in anon_users|named) ;; *) echo "Invalid monitor MODE" >&2; exit 1;; esac
 
 exec 200>"$DIR/.run.lock"
 flock -n 200 || { echo "[$(date -Iseconds)] previous run still in progress, skipping" >> "$LOG"; exit 0; }
@@ -43,7 +44,8 @@ if [ -z "$GPU_NODES" ]; then
 fi
 
 for n in $GPU_NODES; do
-  timeout 45s ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+  if timeout 45s ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+    set -e
     echo "--GPU--"
     nvidia-smi --query-gpu=index,uuid,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits
     echo "--PROC--"
@@ -55,8 +57,11 @@ for n in $GPU_NODES; do
       lab=$(id -Gn "$user" 2>/dev/null | tr " " "\n" | grep -- "-lab$" | head -1)
       printf "PIDMAP %s %s %s %s\n" "$p" "${user:--}" "${job:--}" "${lab:-unknown}"
     done
-  ' 2>>"$LOG" | python3 "$DIR/sample_gpu.py" "$TS" "$n" "$MODE" "$SALT" >> "$GPU_DATA" 2>>"$LOG" \
-    || echo "[$TS] GPU sample incomplete for $n" >> "$LOG"
+  ' > "$STAGE/gpu.txt" 2>>"$LOG"; then
+    python3 "$DIR/sample_gpu.py" "$TS" "$n" "$MODE" "$SALT" < "$STAGE/gpu.txt" >> "$GPU_DATA" 2>>"$LOG"
+  else
+    echo "[$TS] GPU sample incomplete for $n; discarded" >> "$LOG"
+  fi
 done
 
 # ---- CPU sampler: ssh to every node running ANY job (GPU or not - includes
@@ -65,15 +70,19 @@ done
 # as the GPU binding cross-reference below - just cat a file the kernel
 # already maintains. ----
 for n in $ALL_NODES; do
-  timeout 45s ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+  if timeout 45s ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$n" '
+    set -e
     for d in /sys/fs/cgroup/system.slice/slurmstepd.scope/job_*/; do
       [ -d "$d" ] || continue
       job=$(basename "$d"); job=${job#job_}
       usage=$(awk "/^usage_usec/{print \$2}" "$d/cpu.stat" 2>/dev/null)
-      [ -n "$usage" ] && echo "CPUJOB $job $usage"
+      if [ -n "$usage" ]; then echo "CPUJOB $job $usage"; fi
     done
-  ' 2>>"$LOG" | python3 "$DIR/sample_cpu.py" "$TS" "$n" >> "$CPU_DATA" 2>>"$LOG" \
-    || echo "[$TS] CPU sample incomplete for $n" >> "$LOG"
+  ' > "$STAGE/cpu.txt" 2>>"$LOG"; then
+    python3 "$DIR/sample_cpu.py" "$TS" "$n" < "$STAGE/cpu.txt" >> "$CPU_DATA" 2>>"$LOG"
+  else
+    echo "[$TS] CPU sample incomplete for $n; discarded" >> "$LOG"
+  fi
 done
 
 # ---- queue sampler: squeue + sprio + scontrol, straight from the login node, no ssh ----

@@ -18,6 +18,7 @@ is not.
 """
 import sys
 import json
+import math
 from anon import pseudonym
 
 def main():
@@ -25,7 +26,7 @@ def main():
 
     section = None
     gpus = {}       # index -> dict
-    procs = []      # list of (gpu_uuid_or_none, pid, mem)
+    procs = []      # list of (gpu_uuid_or_none, pid)
     pidmap = {}     # pid -> (user, job, lab)
 
     for line in sys.stdin:
@@ -51,9 +52,12 @@ def main():
             else:
                 continue
             try:
+                utilization = float(ugpu)
+                if not math.isfinite(utilization) or not 0 <= utilization <= 100:
+                    continue
                 gpus[int(idx)] = {
                     "gpu_uuid": gpu_uuid,
-                    "util_gpu": float(ugpu), "util_mem": float(umem),
+                    "util_gpu": utilization, "util_mem": float(umem),
                     "mem_used": float(memused), "mem_tot": float(memtot),
                 }
             except ValueError:
@@ -67,10 +71,8 @@ def main():
                 gpu_uuid = None
             else:
                 continue
-            try:
-                procs.append((gpu_uuid, pid, float(mem)))
-            except ValueError:
-                continue
+            # Memory can be N/A; UUID and PID are sufficient for attribution.
+            procs.append((gpu_uuid, pid))
         elif section == "cgroup":
             parts = line.split()
             if len(parts) >= 2 and parts[0] == "PIDMAP":
@@ -81,14 +83,12 @@ def main():
                 pidmap[pid] = ("" if user == "-" else user,
                                "" if job == "-" else job, lab)
 
-    # Join on NVIDIA's device UUID. The former memory-footprint heuristic sent
-    # every process of a symmetric tensor-parallel job to GPU 0 because all
-    # cards/processes used the same amount of memory. Keep that heuristic only
-    # as a compatibility fallback for legacy five/two-column input.
+    # Join on NVIDIA's device UUID. Legacy input without UUIDs is ambiguous
+    # on multi-GPU nodes; leave it for Slurm bindings instead of guessing.
     gpu_users = {idx: [] for idx in gpus}
     uuid_to_idx = {g.get("gpu_uuid"): idx for idx, g in gpus.items()
                    if g.get("gpu_uuid")}
-    for gpu_uuid, pid, mem in procs:
+    for gpu_uuid, pid in procs:
         if not gpus:
             continue
         best_idx = uuid_to_idx.get(gpu_uuid)
@@ -96,7 +96,9 @@ def main():
             # An explicit UUID cannot safely be reassigned to another card.
             continue
         if best_idx is None:
-            best_idx = min(gpus, key=lambda i: abs(gpus[i]["mem_used"] - mem))
+            if len(gpus) != 1:
+                continue
+            best_idx = next(iter(gpus))
         user, job, lab = pidmap.get(pid, ("", "", ""))
         gpu_users[best_idx].append((user, job, lab))
 
