@@ -10,24 +10,24 @@ Samples: 336 queue snapshots, 293 GPU snapshots
 
 - **60.0%** of the cluster's 60 GPUs allocated, averaged across all samples
 - **26.0%** average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **96.2%** average cgroup CPU utilization *when* a CPU is allocated to a job
+- **74.9%** average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Per lab / per user
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours allocated</th><th align='right'>GPU utilization</th></tr>
-<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3104.5</td><td align='right'>42%</td></tr>
-<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>2267.0</td><td align='right'>21%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3104.3</td><td align='right'>42%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>2266.9</td><td align='right'>22%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>571.0</td><td align='right'>39%</td></tr>
-<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>82.5</td><td align='right'>68%</td></tr>
-<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>15.5</td><td align='right'>48%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>82.5</td><td align='right'>34%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>15.5</td><td align='right'>42%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>4.5</td><td align='right'>23%</td></tr>
-<tr style='background-color:#fcf0d8'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>1.0</td><td align='right'>45%</td></tr>
-<tr style='background-color:#fbebf1'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>1.0</td><td align='right'>49%</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#dfeaf8'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>—</td></tr>
-<tr style='background-color:#fce8e0'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>1.0</td><td align='right'>45%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>1.0</td><td align='right'>49%</td></tr>
+<tr style='background-color:#fbebf1'><td>gillen-lab</td><td>user-b89a87ef</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-3cfc41a3</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-40b4d372</td><td align='right'>0.0</td><td align='right'>—</td></tr>
+<tr style='background-color:#d8ecd8'><td>ibarragarciapadilla-lab</td><td>user-eec7ffae</td><td align='right'>0.0</td><td align='right'>—</td></tr>
 </table>
 
 ## Usage over time
@@ -38,10 +38,11 @@ Charts below cover this week: **2026-09-14 00:00 to 2026-09-21 00:00** (UTC-07:0
 
 ![GPU allocation over time](gpu_alloc_util.png)
 
-Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not traceable to a lab, dashed line = cluster capacity.
+Each named lab has its own color. Solid = utilized by lab, hatched = allocated but idle or unmeasured, gray = usage not traceable to a lab, dashed line = cluster capacity. Zero-usage legend entries are omitted.
 
 Attribution combines `nvidia-smi`'s process listing with Slurm's GPU-to-job binding record; the latter caught **686** readings the former missed.
 Allocation counts include all nodes of each job, including corrected historical totals. Before October 2, 2026, utilization sampling could skip nodes in compressed hostlists; those missing readings cannot be reconstructed and do not establish that the GPUs were idle.
+GPU-hour estimates credit at most one 30-minute interval per sample; collector outages are not extrapolated. CPU utilization is weighted by the allocated cores of jobs with observed counters.
 
 ## Queue
 
@@ -53,7 +54,7 @@ Allocation counts include all nodes of each job, including corrected historical 
 
 ![CPU usage vs GPU usage, decayed](cpu_gpu_usage.png)
 
-One point per user per snapshot (n=1493), usage decayed on Slurm's ~7-day fairshare half-life.
+One point per user per snapshot (n=709), usage decayed on Slurm's ~7-day fairshare half-life.
 
 **GPU usage doesn't count toward priority on this cluster** (`TRESBillingWeights`/`PriorityWeightTRES` unset) - watch the **upper-left**: low CPU usage (high priority) with high GPU usage.
 
