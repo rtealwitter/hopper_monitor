@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-10-05T20:00:15-07:00
-Samples: 2934 queue snapshots total (336 in the last 7 days), 2698 GPU snapshots total (331 in the last 7 days)
+Last updated: 2026-10-05T20:30:16-07:00
+Samples: 2935 queue snapshots total (336 in the last 7 days), 2699 GPU snapshots total (331 in the last 7 days)
 
 ## Resources
 
@@ -16,9 +16,9 @@ Samples: 2934 queue snapshots total (336 in the last 7 days), 2698 GPU snapshots
 
 ## Headline
 
-- **56.3%** (last 7 days) vs **48.3%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
-- **48.4%** (last 7 days) vs **44.4%** (all time) average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **77.7%** (last 7 days) vs **72.3%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
+- **56.2%** (last 7 days) vs **48.3%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
+- **48.6%** (last 7 days) vs **44.4%** (all time) average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
+- **77.8%** (last 7 days) vs **72.3%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Most open times
 
@@ -29,16 +29,16 @@ Based on 62 days of history so far, `hopper.cluster` has historically been most 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
 <tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3005.6</td><td align='right'>8388.4</td><td align='right'>85%</td><td align='right'>84%</td></tr>
-<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1978.1</td><td align='right'>13979.4</td><td align='right'>24%</td><td align='right'>27%</td></tr>
-<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>476.8</td><td align='right'>575.3</td><td align='right'>71%</td><td align='right'>67%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>1963.1</td><td align='right'>13979.4</td><td align='right'>24%</td><td align='right'>27%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>479.3</td><td align='right'>580.3</td><td align='right'>71%</td><td align='right'>67%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>98.6</td><td align='right'>17917.1</td><td align='right'>54%</td><td align='right'>57%</td></tr>
 <tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-fedb5feb</td><td align='right'>46.0</td><td align='right'>250.5</td><td align='right'>36%</td><td align='right'>40%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>8.5</td><td align='right'>55.5</td><td align='right'>36%</td><td align='right'>36%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-750df826</td><td align='right'>1.5</td><td align='right'>1.5</td><td align='right'>48%</td><td align='right'>48%</td></tr>
-<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.5</td><td align='right'>8.0</td><td align='right'>46%</td><td align='right'>57%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>0.0</td><td align='right'>964.0</td><td align='right'>—</td><td align='right'>13%</td></tr>
 <tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-6bb5f332</td><td align='right'>0.0</td><td align='right'>200.0</td><td align='right'>—</td><td align='right'>70%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-f5bf0d80</td><td align='right'>0.0</td><td align='right'>65.0</td><td align='right'>—</td><td align='right'>33%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-b12dc074</td><td align='right'>0.0</td><td align='right'>8.0</td><td align='right'>—</td><td align='right'>57%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-ac8c851f</td><td align='right'>0.0</td><td align='right'>5.5</td><td align='right'>—</td><td align='right'>35%</td></tr>
 <tr style='background-color:#fbebf1'><td>gillen-lab</td><td>user-d21e03f5</td><td align='right'>0.0</td><td align='right'>5.0</td><td align='right'>—</td><td align='right'>68%</td></tr>
 <tr style='background-color:#dfeaf8'><td>batta-lab</td><td>user-58bad794</td><td align='right'>0.0</td><td align='right'>0.0</td><td align='right'>—</td><td align='right'>—</td></tr>
@@ -58,7 +58,7 @@ Based on 62 days of history so far, `hopper.cluster` has historically been most 
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-09-28 20:00 to 2026-10-05 20:00** (PDT).
+Charts below cover the trailing 7 days: **2026-09-28 20:30 to 2026-10-05 20:30** (PDT).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
@@ -100,6 +100,6 @@ Dated snapshots of this dashboard, one per fully-elapsed calendar week:
 
 ## Recommendations
 
-1. **Weight GPU usage in fairshare.** `TRESBillingWeights`/`PriorityWeightTRES` are unset, so idle GPUs cost nothing in priority - the failure mode the scatter above flags (upper-left: low CPU usage, high GPU usage). Fix: `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` then `scontrol reconfigure`. Start `<weight>` near the CPUs-per-GPU ratio (128/4=32) and tune against this week's numbers (56.3% allocated, 48.4% utilized when allocated) - a policy call, so loop in whoever owns cluster allocation.
-2. **Escalate on sustained low utilization** (see table and scatter above). Current top candidate (most measured idle GPU-hours over the last 7d): `user-0db9ced0` in `zhuang-lab` - 1649 idle of 2166.0 GPU-hours observed (24% utilization). Needs a utilization threshold (e.g. <20% mean over 50+ GPU-hours) and a grace period, then either a soft nudge (Slack/email) or a hard QOS penalty (`sacctmgr modify qos ... set Priority-=<n>`). Neither exists yet - this is read-only signal, not enforced policy.
+1. **Weight GPU usage in fairshare.** `TRESBillingWeights`/`PriorityWeightTRES` are unset, so idle GPUs cost nothing in priority - the failure mode the scatter above flags (upper-left: low CPU usage, high GPU usage). Fix: `scontrol update partition=main TRESBillingWeights=CPU=1.0,GRES/gpu=<weight>` then `scontrol reconfigure`. Start `<weight>` near the CPUs-per-GPU ratio (128/4=32) and tune against this week's numbers (56.2% allocated, 48.6% utilized when allocated) - a policy call, so loop in whoever owns cluster allocation.
+2. **Escalate on sustained low utilization** (see table and scatter above). Current top candidate (most measured idle GPU-hours over the last 7d): `user-0db9ced0` in `zhuang-lab` - 1637 idle of 2151.0 GPU-hours observed (24% utilization). Needs a utilization threshold (e.g. <20% mean over 50+ GPU-hours) and a grace period, then either a soft nudge (Slack/email) or a hard QOS penalty (`sacctmgr modify qos ... set Priority-=<n>`). Neither exists yet - this is read-only signal, not enforced policy.
 
