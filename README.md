@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-10-11T21:30:47-07:00
-Samples: 3193 queue snapshots total (305 in the last 7 days), 2957 GPU snapshots total (305 in the last 7 days)
+Last updated: 2026-10-11T22:00:48-07:00
+Samples: 3194 queue snapshots total (305 in the last 7 days), 2958 GPU snapshots total (305 in the last 7 days)
 
 ## Resources
 
@@ -18,7 +18,7 @@ Samples: 3193 queue snapshots total (305 in the last 7 days), 2957 GPU snapshots
 
 - **65.6%** (last 7 days) vs **49.7%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
 - **83.2%** (last 7 days) vs **49.2%** (all time) average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
-- **89.0%** (last 7 days) vs **74.5%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
+- **89.0%** (last 7 days) vs **74.6%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
 
 ## Most open times
 
@@ -28,7 +28,7 @@ Based on 68 days of history so far, `hopper.cluster` has historically been most 
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
-<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3887.9</td><td align='right'>11780.3</td><td align='right'>84%</td><td align='right'>84%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>3887.9</td><td align='right'>11796.3</td><td align='right'>84%</td><td align='right'>84%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>956.0</td><td align='right'>14935.4</td><td align='right'>84%</td><td align='right'>31%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>691.3</td><td align='right'>932.2</td><td align='right'>76%</td><td align='right'>68%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>418.4</td><td align='right'>18292.6</td><td align='right'>88%</td><td align='right'>58%</td></tr>
@@ -60,7 +60,7 @@ Based on 68 days of history so far, `hopper.cluster` has historically been most 
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-10-04 21:30 to 2026-10-11 21:30** (PDT).
+Charts below cover the trailing 7 days: **2026-10-04 22:00 to 2026-10-11 22:00** (PDT).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
@@ -82,7 +82,7 @@ GPU-hour estimates credit at most one 30-minute interval per sample; collector o
 
 ![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)
 
-One point per user per snapshot (n=927), usage decayed on Slurm's ~7-day fairshare half-life.
+One point per user per snapshot (n=929), usage decayed on Slurm's ~7-day fairshare half-life.
 
 GPU usage is weighted into fairshare priority on this cluster (`TRESBillingWeights`/`PriorityWeightTRES` set).
 
