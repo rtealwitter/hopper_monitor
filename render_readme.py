@@ -16,6 +16,8 @@ import math
 import statistics as stats
 import colorsys
 import hashlib
+import sys
+from functools import lru_cache
 from accounting import attribute_gpus, cpu_rates, parse_ts
 from data_store import sample_files
 from sample_queue import normalize_gpu_allocations
@@ -70,6 +72,18 @@ plt.rcParams.update({
 
 
 def load_jsonl(path):
+    # json.loads creates fresh keys and values for every line. Most telemetry
+    # strings repeat across hundreds of thousands of rows; share them without
+    # retaining an unbounded cache of unique values.
+    @lru_cache(maxsize=16384)
+    def shared_string(value):
+        return value
+
+    def share_strings(row):
+        return {sys.intern(key): shared_string(value) if isinstance(value, str) else value
+                for key, value in row.items()}
+
+    decoder = json.JSONDecoder(object_hook=share_strings)
     rows = []
     for part in sample_files(path):
         with open(part) as f:
@@ -78,7 +92,7 @@ def load_jsonl(path):
                 if not line:
                     continue
                 try:
-                    rows.append(json.loads(line))
+                    rows.append(decoder.decode(line))
                 except json.JSONDecodeError:
                     continue
     return rows
@@ -939,7 +953,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh-archives", action="store_true",
                         help="Regenerate archived reports after accounting corrections")
+    parser.add_argument("--completion-file", type=Path,
+                        help="Write a receipt only after all reports finish successfully")
     args = parser.parse_args()
+    if args.completion_file:
+        args.completion_file.unlink(missing_ok=True)
     gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
     cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
     queue_rows_all = normalize_gpu_allocations(
@@ -949,6 +967,8 @@ def main():
             "# hopper_monitor\n\nNo samples recorded yet - check back after "
             "the next 30-minute cron tick.\n"
         )
+        if args.completion_file:
+            args.completion_file.write_text("complete\n")
         return
 
     now = datetime.now().astimezone()
@@ -967,7 +987,7 @@ def main():
             if has_data:
                 label = f"{week_start:%Y-%m-%d}_{(week_end - timedelta(days=1)):%Y-%m-%d}"
                 week_dir = ARCHIVE / label
-                if args.refresh_archives or not week_dir.exists():
+                if args.refresh_archives or not (week_dir / "README.md").is_file():
                     render(gpu_rows, cpu_util_rows, queue_rows_all,
                            week_dir, week_dir / "README.md",
                            week_start, week_end, img_prefix="", live=False,
@@ -983,6 +1003,8 @@ def main():
     render(gpu_rows, cpu_util_rows, queue_rows_all, ASSETS, DIR / "README.md",
            now - timedelta(days=ROLLING_WINDOW_DAYS), now, img_prefix="assets/",
            live=True, archive_links=archive_links)
+    if args.completion_file:
+        args.completion_file.write_text("complete\n")
 
 
 if __name__ == "__main__":

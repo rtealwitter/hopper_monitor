@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 import io
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from pathlib import Path
 
@@ -12,12 +13,25 @@ sys.path.insert(0, str(ROOT))
 
 from render_readme import consume_idle_with_unattributed
 from render_readme import load_jsonl
+import render_readme
 from data_store import migrate, sample_path, sample_files
 from sample_queue import (display_job_id, expand_nodelist, gpu_bindings,
                           normalize_gpu_allocations, parse_gpus, main as sample_queue)
 
 
 class SampleStorageTests(unittest.TestCase):
+    def test_loader_shares_strings_without_changing_records(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "queue_samples.jsonl"
+            row = {"job_id": "123456", "lab": "example-lab", "cpus": 8,
+                   "nested": {"lab": "example-lab"}, "missing": None}
+            path.write_text(json.dumps(row) + "\ninvalid\n\n" + json.dumps(row) + "\n")
+            rows = load_jsonl(path)
+            self.assertEqual(rows, [row, row])
+            self.assertIs(rows[0]["lab"], rows[1]["lab"])
+            self.assertIs(rows[0]["lab"], rows[0]["nested"]["lab"])
+            self.assertIs(next(iter(rows[0])), next(iter(rows[1])))
+
     def test_migration_preserves_bytes_order_and_bounded_parts(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "queue_samples.jsonl"
@@ -54,6 +68,39 @@ class SampleStorageTests(unittest.TestCase):
                 migrate(path, limit=8)
             self.assertEqual(path.read_bytes(), b"0123456789\n")
             self.assertFalse(path.with_suffix("").exists())
+
+
+class RenderCompletionTests(unittest.TestCase):
+    def test_receipt_requires_success_and_incomplete_archive_is_retried(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "archive"
+            archive.mkdir()
+            week = render_readme.monday_of(datetime.now(timezone.utc)) - timedelta(days=7)
+            label = f"{week:%Y-%m-%d}_{(week + timedelta(days=6)):%Y-%m-%d}"
+            incomplete = archive / label
+            incomplete.mkdir()  # previous render died after creating its directory
+            receipt = root / "complete"
+            sample = {"ts": (week + timedelta(days=1)).isoformat(), "kind": "totals"}
+
+            def fake_render(*args, **kwargs):
+                args[4].write_text("rendered\n")
+
+            with patch.object(render_readme, "DIR", root), \
+                 patch.object(render_readme, "ASSETS", root / "assets"), \
+                 patch.object(render_readme, "ARCHIVE", archive), \
+                 patch.object(render_readme, "load_jsonl", return_value=[sample]), \
+                 patch("sys.argv", ["render_readme.py", "--completion-file", str(receipt)]):
+                receipt.write_text("stale receipt\n")
+                with patch.object(render_readme, "render", side_effect=RuntimeError("failed")):
+                    with self.assertRaises(RuntimeError):
+                        render_readme.main()
+                self.assertFalse(receipt.exists())
+                with patch.object(render_readme, "render", side_effect=fake_render) as render:
+                    render_readme.main()
+                self.assertEqual(render.call_count, 2)
+                self.assertTrue((incomplete / "README.md").exists())
+                self.assertEqual(receipt.read_text(), "complete\n")
 
 
 class GpuSampleTests(unittest.TestCase):

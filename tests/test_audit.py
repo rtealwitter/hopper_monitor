@@ -166,6 +166,30 @@ class RunnerAuditTests(unittest.TestCase):
         (root / "run.sh").write_text(script)
         return root
 
+    def test_scheduler_success_without_render_receipt_cannot_publish(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.fixture(temp)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            commands = {
+                "python3": "#!/bin/sh\necho /dev/null\n",
+                "squeue": "#!/bin/sh\nexit 0\n",
+                "sinfo": "#!/bin/sh\nexit 0\n",
+                "sbatch": "#!/bin/sh\nexit 0\n",
+                "git": f"#!/bin/sh\ntouch '{root / 'published'}'\n",
+            }
+            for name, source in commands.items():
+                path = fake_bin / name
+                path.write_text(source)
+                path.chmod(0o755)
+            result = subprocess.run(["bash", str(root / "run.sh")],
+                                    env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse((root / "published").exists())
+            self.assertIn("missing completion receipt", (root / "monitor.log").read_text())
+            self.assertFalse(list(root.glob(".run-*")))
+
     def test_partial_queue_failure_does_not_append_or_publish(self):
         with tempfile.TemporaryDirectory() as temp:
             root = self.fixture(temp)

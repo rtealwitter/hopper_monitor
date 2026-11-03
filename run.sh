@@ -19,7 +19,8 @@ TS=$(date -Iseconds)
 echo "[$TS] run start (mode=$MODE)" >> "$LOG"
 
 # Do not publish a partial or false-empty queue snapshot after a Slurm failure.
-STAGE=$(mktemp -d) || exit 1
+# Shared storage lets the compute-node renderer leave a completion receipt.
+STAGE=$(mktemp -d "$DIR/.run-XXXXXX") || exit 1
 trap 'rm -rf "$STAGE"' EXIT
 python3 "$DIR/sample_queue.py" "$TS" "$MODE" "$SALT" > "$STAGE/queue.jsonl" 2>>"$LOG" \
   || { echo "[$TS] queue sampling FAILED" >> "$LOG"; exit 1; }
@@ -89,18 +90,25 @@ done
 cat "$STAGE/queue.jsonl" >> "$QUEUE_DATA" || exit 1
 
 # ---- render README + charts on a compute node (never matplotlib on the login node) ----
-if sbatch --wait --partition=debug --time=5 --cpus-per-task=1 --mem=2G \
+if sbatch --wait --partition=debug --time=10 --cpus-per-task=1 --mem=8G \
     --job-name=hopper_monitor_render --output="$DIR/render.out" --error="$DIR/render.out" \
-    --wrap="cd $DIR && .venv/bin/python3 render_readme.py" >> "$LOG" 2>&1; then
-  echo "[$TS] render complete" >> "$LOG"
+    --wrap="cd $DIR && .venv/bin/python3 render_readme.py --completion-file $STAGE/render.complete" >> "$LOG" 2>&1 \
+    && [ -s "$STAGE/render.complete" ]; then
+  echo "[$(date -Iseconds)] render complete" >> "$LOG"
 else
-  echo "[$TS] render FAILED - skipping commit this cycle" >> "$LOG"
+  # Slurm can return success for a timed-out job whose batch step was OOM
+  # killed. Require the renderer's own receipt before publishing anything.
+  echo "[$(date -Iseconds)] render FAILED or missing completion receipt - skipping commit this cycle" >> "$LOG"
+  if [ -f "$DIR/render.out" ]; then cat "$DIR/render.out" >> "$LOG"; fi
   exit 1
 fi
 
 # ---- commit + push ----
 cd "$DIR"
 git add -A -- README.md assets data archive >> "$LOG" 2>&1 || exit 1
+# Reports are written by another node on shared storage. Re-read their
+# contents even if the login node still has cached pre-render file metadata.
+git add --renormalize -- README.md assets >> "$LOG" 2>&1 || exit 1
 if ! git diff --cached --quiet; then
   git commit -q -m "update $TS" >> "$LOG" 2>&1 \
     || { echo "[$TS] git commit FAILED" >> "$LOG"; exit 1; }
@@ -112,4 +120,4 @@ fi
 git push -q >> "$LOG" 2>&1 \
   || { echo "[$TS] git push FAILED" >> "$LOG"; exit 1; }
 
-echo "[$TS] run complete" >> "$LOG"
+echo "[$(date -Iseconds)] run complete" >> "$LOG"
