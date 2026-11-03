@@ -4,12 +4,27 @@ Run under run.sh's lock. Legacy files are migrated before sampling; the
 completed directory is published atomically before the old file is removed.
 """
 import os
+import json
+from functools import lru_cache
 from pathlib import Path
 import sys
 import tempfile
 
 PART_BYTES = 32 * 1024 * 1024
 DATA = Path(__file__).resolve().parent / "data"
+
+
+def shared_json_decoder():
+    """Share repeated telemetry strings while retaining a bounded value cache."""
+    @lru_cache(maxsize=16384)
+    def shared_string(value):
+        return value
+
+    def share_strings(row):
+        return {sys.intern(key): shared_string(value) if isinstance(value, str) else value
+                for key, value in row.items()}
+
+    return json.JSONDecoder(object_hook=share_strings)
 
 
 def migrate(path, limit=PART_BYTES):

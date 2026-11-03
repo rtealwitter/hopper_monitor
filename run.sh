@@ -90,7 +90,7 @@ done
 cat "$STAGE/queue.jsonl" >> "$QUEUE_DATA" || exit 1
 
 # ---- render README + charts on a compute node (never matplotlib on the login node) ----
-if sbatch --wait --partition=debug --time=10 --cpus-per-task=1 --mem=8G \
+if sbatch --wait --partition=debug --time=10 --cpus-per-task=1 --mem=512M \
     --job-name=hopper_monitor_render --output="$DIR/render.out" --error="$DIR/render.out" \
     --wrap="cd $DIR && .venv/bin/python3 render_readme.py --completion-file $STAGE/render.complete" >> "$LOG" 2>&1 \
     && [ -s "$STAGE/render.complete" ]; then
@@ -105,10 +105,19 @@ fi
 
 # ---- commit + push ----
 cd "$DIR"
+# NFS can temporarily expose cached files after the compute job exits. Check
+# the renderer's hashes before staging, then refresh mtimes locally so Git
+# cannot skip changed reports based on cached stat information.
+for attempt in {1..60}; do
+  if sha256sum --check --quiet "$STAGE/render.complete" 2>/dev/null; then break; fi
+  if [ "$attempt" -eq 60 ]; then
+    echo "[$(date -Iseconds)] rendered files not yet visible - skipping commit" >> "$LOG"
+    exit 1
+  fi
+  sleep 1
+done
+while read -r digest report; do touch "$report"; done < "$STAGE/render.complete"
 git add -A -- README.md assets data archive >> "$LOG" 2>&1 || exit 1
-# Reports are written by another node on shared storage. Re-read their
-# contents even if the login node still has cached pre-render file metadata.
-git add --renormalize -- README.md assets >> "$LOG" 2>&1 || exit 1
 if ! git diff --cached --quiet; then
   git commit -q -m "update $TS" >> "$LOG" 2>&1 \
     || { echo "[$TS] git commit FAILED" >> "$LOG"; exit 1; }

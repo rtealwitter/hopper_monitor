@@ -16,10 +16,10 @@ import math
 import statistics as stats
 import colorsys
 import hashlib
-import sys
-from functools import lru_cache
+from contextlib import closing
+from history import History
 from accounting import attribute_gpus, cpu_rates, parse_ts
-from data_store import sample_files
+from data_store import sample_files, shared_json_decoder
 from sample_queue import normalize_gpu_allocations
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -72,18 +72,7 @@ plt.rcParams.update({
 
 
 def load_jsonl(path):
-    # json.loads creates fresh keys and values for every line. Most telemetry
-    # strings repeat across hundreds of thousands of rows; share them without
-    # retaining an unbounded cache of unique values.
-    @lru_cache(maxsize=16384)
-    def shared_string(value):
-        return value
-
-    def share_strings(row):
-        return {sys.intern(key): shared_string(value) if isinstance(value, str) else value
-                for key, value in row.items()}
-
-    decoder = json.JSONDecoder(object_hook=share_strings)
+    decoder = shared_json_decoder()
     rows = []
     for part in sample_files(path):
         with open(part) as f:
@@ -453,7 +442,8 @@ def compute_open_times(queue_rows_all):
 
 def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
            assets_dir, readme_path, window_start, window_end, img_prefix,
-           live, back_link=None, archive_links=None):
+           live, back_link=None, archive_links=None, *, historical_headline=None,
+           historical_open_times=None, cpu_usage=None):
     """Builds one full report (charts + README.md) from samples in
     [window_start, window_end). Used both for the live rolling-7-day
     dashboard (assets_dir=assets/, img_prefix="assets/") and for a single
@@ -495,14 +485,17 @@ def render(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered,
     # ever cover their own window, so there's no separate "all time" cut. ----
     gpu_dedup, backfilled = attribute_gpus(gpu_rows, queue_rows_all)
     # Include the preceding counter to measure CPU usage at the window boundary.
-    cpu_equiv_by_ts_job = {key: value for key, value in
-                          cpu_rates(cpu_util_rows_all, queue_rows_all_unfiltered).items()
+    available_rates = (cpu_usage if cpu_usage is not None else
+                       cpu_rates(cpu_util_rows_all, queue_rows_all_unfiltered))
+    cpu_equiv_by_ts_job = {key: value for key, value in available_rates.items()
                           if window_start <= parse_ts(key[0]) < window_end}
     headline_week = compute_headline(gpu_rows, cpu_util_rows, queue_rows_all,
                                     usage=(gpu_dedup, cpu_equiv_by_ts_job))
-    headline_all = (compute_headline(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered)
-                     if live else None)
-    open_times = compute_open_times(queue_rows_all_unfiltered) if live else None
+    headline_all = ((historical_headline if historical_headline is not None else
+                     compute_headline(gpu_rows_all, cpu_util_rows_all, queue_rows_all_unfiltered))
+                    if live else None)
+    open_times = ((historical_open_times if historical_headline is not None else
+                   compute_open_times(queue_rows_all_unfiltered)) if live else None)
 
     owner_by_ts_job = {(r["ts"], r["job_id"]): (r.get("user"), r.get("lab"))
                        for r in queue_rows}
@@ -955,43 +948,49 @@ def main():
                         help="Regenerate archived reports after accounting corrections")
     parser.add_argument("--completion-file", type=Path,
                         help="Write a receipt only after all reports finish successfully")
+    parser.add_argument("--rebuild-cache", action="store_true",
+                        help="Rebuild incremental accounting from the original JSONL samples")
     args = parser.parse_args()
     if args.completion_file:
         args.completion_file.unlink(missing_ok=True)
-    gpu_rows = load_jsonl(DIR / "data" / "gpu_samples.jsonl")
-    cpu_util_rows = load_jsonl(DIR / "data" / "cpu_samples.jsonl")
-    queue_rows_all = normalize_gpu_allocations(
-        load_jsonl(DIR / "data" / "queue_samples.jsonl"))
-    if not gpu_rows and not queue_rows_all:
+    with closing(History(DIR, rebuild=args.rebuild_cache)) as history:
+        history.update()
+        archive_reports = render_history(history, refresh_archives=args.refresh_archives)
+    if args.completion_file:
+        write_completion_receipt(args.completion_file, archive_reports)
+
+
+def render_history(history, *, refresh_archives=False):
+    first = history.first_timestamp()
+    if first is None:
         (DIR / "README.md").write_text(
             "# hopper_monitor\n\nNo samples recorded yet - check back after "
             "the next 30-minute cron tick.\n"
         )
-        if args.completion_file:
-            args.completion_file.write_text("complete\n")
-        return
+        return []
 
     now = datetime.now().astimezone()
+    archive_reports = []
 
     # ================= weekly archive catch-up =================
     # One dated snapshot per fully-elapsed calendar week (Monday-Sunday).
     # Existing archives stay frozen unless explicitly refreshing accounting.
-    all_ts = sorted({parse_ts(r["ts"]) for r in gpu_rows} |
-                     {parse_ts(r["ts"]) for r in queue_rows_all} |
-                     {parse_ts(r["ts"]) for r in cpu_util_rows})
-    if all_ts:
-        week_start = monday_of(all_ts[0])
+    if first:
+        week_start = monday_of(first)
         while week_start + timedelta(days=7) <= now:
             week_end = week_start + timedelta(days=7)
-            has_data = any(week_start <= t < week_end for t in all_ts)
+            has_data = history.has_samples(week_start, week_end)
             if has_data:
                 label = f"{week_start:%Y-%m-%d}_{(week_end - timedelta(days=1)):%Y-%m-%d}"
                 week_dir = ARCHIVE / label
-                if args.refresh_archives or not (week_dir / "README.md").is_file():
-                    render(gpu_rows, cpu_util_rows, queue_rows_all,
+                if refresh_archives or not (week_dir / "README.md").is_file():
+                    gpu_rows, queue_rows_all, rates = history.window(week_start, week_end)
+                    render(gpu_rows, [], queue_rows_all,
                            week_dir, week_dir / "README.md",
                            week_start, week_end, img_prefix="", live=False,
-                           back_link="../../README.md")
+                           back_link="../../README.md", cpu_usage=rates)
+                    archive_reports.extend([week_dir / "README.md", *sorted(week_dir.glob("*.png"))])
+                    del gpu_rows, queue_rows_all, rates
             week_start += timedelta(days=7)
 
     archive_links = sorted(
@@ -1000,11 +999,22 @@ def main():
     )
 
     # ================= live rolling-window dashboard =================
-    render(gpu_rows, cpu_util_rows, queue_rows_all, ASSETS, DIR / "README.md",
-           now - timedelta(days=ROLLING_WINDOW_DAYS), now, img_prefix="assets/",
-           live=True, archive_links=archive_links)
-    if args.completion_file:
-        args.completion_file.write_text("complete\n")
+    window_start = now - timedelta(days=ROLLING_WINDOW_DAYS)
+    gpu_rows, queue_rows_all, rates = history.window(window_start, now)
+    render(gpu_rows, [], queue_rows_all, ASSETS, DIR / "README.md",
+           window_start, now, img_prefix="assets/", live=True, archive_links=archive_links,
+           historical_headline=history.headline(lab_palette),
+           historical_open_times=history.open_times(), cpu_usage=rates)
+    return archive_reports
+
+
+def write_completion_receipt(path, archive_reports=()):
+    """Let the publishing node verify that NFS exposes the completed reports."""
+    reports = [DIR / "README.md", *sorted(ASSETS.glob("*.png")), *archive_reports]
+    path.write_text("".join(
+        f"{hashlib.sha256(report.read_bytes()).hexdigest()}  {report.relative_to(DIR)}\n"
+        for report in reports
+    ))
 
 
 if __name__ == "__main__":

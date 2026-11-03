@@ -81,7 +81,10 @@ class RenderCompletionTests(unittest.TestCase):
             incomplete = archive / label
             incomplete.mkdir()  # previous render died after creating its directory
             receipt = root / "complete"
-            sample = {"ts": (week + timedelta(days=1)).isoformat(), "kind": "totals"}
+            sample = {"ts": (week + timedelta(days=1)).isoformat(), "kind": "totals",
+                      "cpus_total": 16, "gpus_total": 4}
+            (root / "data").mkdir()
+            (root / "data" / "queue_samples.jsonl").write_text(json.dumps(sample) + "\n")
 
             def fake_render(*args, **kwargs):
                 args[4].write_text("rendered\n")
@@ -89,7 +92,6 @@ class RenderCompletionTests(unittest.TestCase):
             with patch.object(render_readme, "DIR", root), \
                  patch.object(render_readme, "ASSETS", root / "assets"), \
                  patch.object(render_readme, "ARCHIVE", archive), \
-                 patch.object(render_readme, "load_jsonl", return_value=[sample]), \
                  patch("sys.argv", ["render_readme.py", "--completion-file", str(receipt)]):
                 receipt.write_text("stale receipt\n")
                 with patch.object(render_readme, "render", side_effect=RuntimeError("failed")):
@@ -100,7 +102,9 @@ class RenderCompletionTests(unittest.TestCase):
                     render_readme.main()
                 self.assertEqual(render.call_count, 2)
                 self.assertTrue((incomplete / "README.md").exists())
-                self.assertEqual(receipt.read_text(), "complete\n")
+                result = subprocess.run(["sha256sum", "--check", str(receipt)],
+                                        cwd=root, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class GpuSampleTests(unittest.TestCase):
