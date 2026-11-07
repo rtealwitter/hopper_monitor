@@ -90,9 +90,11 @@ done
 cat "$STAGE/queue.jsonl" >> "$QUEUE_DATA" || exit 1
 
 # ---- render README + charts on a compute node (never matplotlib on the login node) ----
-if sbatch --wait --partition=debug --time=10 --cpus-per-task=1 --mem=512M \
+# himem02 has stalled NFS reads of historical queue samples (2026-11-07).
+# Keep rendering on other compute nodes until that node's filesystem is repaired.
+if sbatch --wait --partition=debug --exclude=himem02 --time=10 --cpus-per-task=1 --mem=512M \
     --job-name=hopper_monitor_render --output="$DIR/render.out" --error="$DIR/render.out" \
-    --wrap="cd $DIR && .venv/bin/python3 render_readme.py --completion-file $STAGE/render.complete" >> "$LOG" 2>&1 \
+    --wrap="cd $DIR && .venv/bin/python3 -u render_readme.py --completion-file $STAGE/render.complete" >> "$LOG" 2>&1 \
     && [ -s "$STAGE/render.complete" ]; then
   echo "[$(date -Iseconds)] render complete" >> "$LOG"
 else
