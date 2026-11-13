@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-11-12T19:00:23-08:00
-Samples: 4731 queue snapshots total (337 in the last 7 days), 4495 GPU snapshots total (337 in the last 7 days)
+Last updated: 2026-11-12T19:30:23-08:00
+Samples: 4732 queue snapshots total (337 in the last 7 days), 4496 GPU snapshots total (337 in the last 7 days)
 
 ## Resources
 
@@ -16,7 +16,7 @@ Samples: 4731 queue snapshots total (337 in the last 7 days), 4495 GPU snapshots
 
 ## Headline
 
-- **66.3%** (last 7 days) vs **50.2%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
+- **66.4%** (last 7 days) vs **50.2%** (all time) of the cluster's 60 GPUs allocated, averaged across samples
 - **68.4%** (last 7 days) vs **58.1%** (all time) average observed `nvidia-smi` utilization *when* a GPU is allocated to a job
 - **82.8%** (last 7 days) vs **83.5%** (all time) average cgroup CPU utilization *when* a CPU is allocated to a job
 
@@ -28,10 +28,10 @@ Based on 100 days of history so far, `hopper.cluster` has historically been most
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
-<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>5039.8</td><td align='right'>31313.9</td><td align='right'>72%</td><td align='right'>55%</td></tr>
-<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>779.0</td><td align='right'>13699.7</td><td align='right'>51%</td><td align='right'>80%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>5039.8</td><td align='right'>31328.9</td><td align='right'>72%</td><td align='right'>55%</td></tr>
+<tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>776.0</td><td align='right'>13699.7</td><td align='right'>51%</td><td align='right'>80%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>432.0</td><td align='right'>4821.1</td><td align='right'>70%</td><td align='right'>68%</td></tr>
-<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-ac8c851f</td><td align='right'>215.5</td><td align='right'>279.0</td><td align='right'>78%</td><td align='right'>67%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-ac8c851f</td><td align='right'>222.5</td><td align='right'>286.0</td><td align='right'>78%</td><td align='right'>67%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>199.0</td><td align='right'>19270.4</td><td align='right'>45%</td><td align='right'>57%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-7d156b54</td><td align='right'>10.5</td><td align='right'>126.5</td><td align='right'>29%</td><td align='right'>25%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-750df826</td><td align='right'>1.0</td><td align='right'>6.0</td><td align='right'>39%</td><td align='right'>50%</td></tr>
@@ -67,7 +67,7 @@ Based on 100 days of history so far, `hopper.cluster` has historically been most
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-11-05 19:00 to 2026-11-12 19:00** (PST).
+Charts below cover the trailing 7 days: **2026-11-05 19:30 to 2026-11-12 19:30** (PST).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
@@ -89,7 +89,7 @@ GPU-hour estimates credit at most one 30-minute interval per sample; collector o
 
 ![CPU usage vs GPU usage, decayed](assets/cpu_gpu_usage.png)
 
-One point per user per snapshot (n=946), usage decayed on Slurm's ~7-day fairshare half-life.
+One point per user per snapshot (n=948), usage decayed on Slurm's ~7-day fairshare half-life.
 
 GPU usage is weighted into fairshare priority on this cluster (`TRESBillingWeights`/`PriorityWeightTRES` set).
 
