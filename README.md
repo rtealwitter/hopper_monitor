@@ -2,8 +2,8 @@
 
 Automated GPU/CPU/queue utilization tracker for `hopper.cluster`, updated every 30 minutes by cron. Usernames are anonymized to a stable per-account pseudonym; lab names are real.
 
-Last updated: 2026-11-28T05:00:19-08:00
-Samples: 5471 queue snapshots total (336 in the last 7 days), 5235 GPU snapshots total (336 in the last 7 days)
+Last updated: 2026-11-28T05:30:19-08:00
+Samples: 5472 queue snapshots total (336 in the last 7 days), 5236 GPU snapshots total (336 in the last 7 days)
 
 ## Resources
 
@@ -28,8 +28,8 @@ Based on 116 days of history so far, `hopper.cluster` has historically been most
 
 <table>
 <tr><th>Lab</th><th>User</th><th align='right'>GPU-hours (last 7d)</th><th align='right'>GPU-hours (all time)</th><th align='right'>GPU util (last 7d)</th><th align='right'>GPU util (all time)</th></tr>
-<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>4137.9</td><td align='right'>25114.8</td><td align='right'>95%</td><td align='right'>65%</td></tr>
-<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>3100.9</td><td align='right'>39164.7</td><td align='right'>73%</td><td align='right'>58%</td></tr>
+<tr style='background-color:#d8efef'><td>witter-lab</td><td>user-554c620c</td><td align='right'>4133.9</td><td align='right'>25126.8</td><td align='right'>95%</td><td align='right'>65%</td></tr>
+<tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-0db9ced0</td><td align='right'>3100.9</td><td align='right'>39172.2</td><td align='right'>73%</td><td align='right'>58%</td></tr>
 <tr style='background-color:#e3e1f1'><td>nerenberg-lab</td><td>user-7eb22d7c</td><td align='right'>0.0</td><td align='right'>14707.6</td><td align='right'>—</td><td align='right'>81%</td></tr>
 <tr style='background-color:#deebf4'><td>zhuang-lab</td><td>user-e67a8f7c</td><td align='right'>0.0</td><td align='right'>6204.6</td><td align='right'>—</td><td align='right'>71%</td></tr>
 <tr style='background-color:#d8efef'><td>witter-lab</td><td>user-d58f5a15</td><td align='right'>0.0</td><td align='right'>964.0</td><td align='right'>—</td><td align='right'>13%</td></tr>
@@ -67,7 +67,7 @@ Based on 116 days of history so far, `hopper.cluster` has historically been most
 
 ## Usage over time
 
-Charts below cover the trailing 7 days: **2026-11-21 05:00 to 2026-11-28 05:00** (PST).
+Charts below cover the trailing 7 days: **2026-11-21 05:30 to 2026-11-28 05:30** (PST).
 
 ![CPU allocation over time](assets/cpu_alloc.png)
 
